@@ -167,3 +167,123 @@
   color: var(--sicro-fg);
   margin: 0;
 }
+
+/* ---- MVP 6 additions ---- */
+
+.layer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--sicro-surface-2);
+  border: 1px solid var(--sicro-border);
+}
+.layerKind {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--sicro-fg-dim);
+}
+
+.category {
+  margin-top: 8px;
+}
+.categoryTitle {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--sicro-fg-dim);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.objectItem {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 2px 4px;
+  font-size: var(--text-xs);
+  color: var(--sicro-fg);
+  background: transparent;
+  border-radius: 3px;
+}
+.objectItem:hover {
+  background: rgba(90, 169, 230, 0.08);
+}
+.objectItemActive {
+  background: rgba(90, 169, 230, 0.18);
+}
+.objectVisBtn,
+.objectAction {
+  background: transparent;
+  border: none;
+  color: var(--sicro-fg-dim);
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.objectVisBtn:hover,
+.objectAction:hover {
+  color: var(--sicro-fg);
+  background: var(--sicro-surface-1);
+}
+.objectKindBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 14px;
+  padding: 0 3px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--sicro-fg-muted);
+  background: var(--sicro-surface-2);
+  border: 1px solid var(--sicro-border);
+  border-radius: 3px;
+  margin-right: 4px;
+}
+.objectLabelBtn {
+  background: transparent;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  text-align: left;
+  color: var(--sicro-fg);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0;
+}
+.renameInput {
+  flex: 1;
+  background: var(--sicro-surface-2);
+  border: 1px solid var(--sicro-accent);
+  border-radius: 3px;
+  color: var(--sicro-fg);
+  font-size: var(--text-xs);
+  height: 20px;
+  padding: 0 4px;
+  font-family: inherit;
+}
+
+.checkboxRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+  color: var(--sicro-fg-muted);
+  margin-top: 2px;
+}
+.checkboxRow input[type="checkbox"] {
+  accent-color: var(--sicro-accent);
+}
+
+.dim {
+  color: var(--sicro-fg-dim);
+}

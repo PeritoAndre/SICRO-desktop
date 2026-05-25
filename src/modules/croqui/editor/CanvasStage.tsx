@@ -15,6 +15,8 @@
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
+  Circle,
+  Ellipse,
   Group,
   Image as KonvaImage,
   Layer,
@@ -39,6 +41,7 @@ import {
   type SicroPoint,
   type SicroTextObject,
   type SicroVehicleObject,
+  type VehicleBodyType,
 } from "../engine";
 import type { EditorState, Tool } from "./useEditorState";
 
@@ -411,13 +414,15 @@ function VehicleNode({
   onSelect: () => void;
   onChange: (patch: Partial<SicroObject>) => void;
 }) {
+  const body: VehicleBodyType = obj.body_type ?? "car";
+  const isTwoWheel = body === "moto" || body === "bike";
   return (
     <Group
       id={obj.id}
       x={obj.x}
       y={obj.y}
       rotation={obj.rotation}
-      draggable={draggable}
+      draggable={draggable && !obj.locked}
       onClick={onSelect}
       onTap={onSelect}
       onDragEnd={(e) =>
@@ -438,35 +443,34 @@ function VehicleNode({
         } as Partial<SicroObject>);
       }}
     >
-      <Rect
+      <VehicleSilhouette
+        body={body}
         width={obj.width}
         height={obj.height}
-        offsetX={obj.width / 2}
-        offsetY={obj.height / 2}
-        fill={obj.color ?? "#3b82f6"}
-        stroke={selected ? "#0ea5e9" : "#1e3a8a"}
-        strokeWidth={selected ? 2 : 1.5}
-        cornerRadius={4}
+        color={obj.color ?? "#3b82f6"}
+        selected={selected}
       />
-      {/* Small triangle to indicate "front" of the vehicle. */}
-      <Line
-        points={[
-          obj.width / 2,
-          0,
-          obj.width / 2 - 8,
-          -obj.height / 2 - 6,
-          obj.width / 2 + 8,
-          -obj.height / 2 - 6,
-        ]}
-        closed
-        fill={obj.color ?? "#3b82f6"}
-        opacity={0.5}
-        listening={false}
-      />
+      {/* "Frente" do veículo — pequeno triângulo apontando para +x. */}
+      {!isTwoWheel && (
+        <Line
+          points={[
+            obj.width / 2,
+            0,
+            obj.width / 2 - 8,
+            -obj.height / 2 - 6,
+            obj.width / 2 + 8,
+            -obj.height / 2 - 6,
+          ]}
+          closed
+          fill={obj.color ?? "#3b82f6"}
+          opacity={0.5}
+          listening={false}
+        />
+      )}
       {obj.label && (
         <KonvaText
           text={obj.label}
-          fontSize={12}
+          fontSize={isTwoWheel ? 10 : 12}
           fontStyle="bold"
           fill="#ffffff"
           width={obj.width}
@@ -476,6 +480,104 @@ function VehicleNode({
           listening={false}
         />
       )}
+    </Group>
+  );
+}
+
+/**
+ * Vector silhouettes for each vehicle body subtype (MVP 6). Drawn as
+ * primitives so we don't ship raster assets and the canvas stays
+ * resolution-independent. Top-down orientation: +x = "front".
+ */
+function VehicleSilhouette({
+  body,
+  width,
+  height,
+  color,
+  selected,
+}: {
+  body: VehicleBodyType;
+  width: number;
+  height: number;
+  color: string;
+  selected: boolean;
+}) {
+  const stroke = selected ? "#0ea5e9" : "#1e3a8a";
+  const strokeWidth = selected ? 2 : 1.5;
+
+  if (body === "moto" || body === "bike") {
+    const wheelR = height * 0.45;
+    return (
+      <Group>
+        <Rect
+          x={-width / 2}
+          y={-height / 2}
+          width={width}
+          height={height}
+          fill={color}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          cornerRadius={Math.min(width, height) / 2}
+        />
+        <Circle x={-width / 2 + wheelR} y={0} radius={wheelR * 0.4} fill="#111827" />
+        <Circle x={width / 2 - wheelR} y={0} radius={wheelR * 0.4} fill="#111827" />
+      </Group>
+    );
+  }
+
+  if (body === "truck" || body === "caminhao") {
+    // Cabin (1/3 da frente) + carroceria (2/3 atrás).
+    const cabinW = width * 0.32;
+    return (
+      <Group>
+        <Rect
+          x={-width / 2}
+          y={-height / 2}
+          width={width - cabinW}
+          height={height}
+          fill="#52525b"
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          cornerRadius={3}
+        />
+        <Rect
+          x={width / 2 - cabinW}
+          y={-height / 2}
+          width={cabinW}
+          height={height}
+          fill={color}
+          stroke={stroke}
+          strokeWidth={strokeWidth}
+          cornerRadius={3}
+        />
+      </Group>
+    );
+  }
+
+  // sedan / suv / hatch / car / other — corpo arredondado com vidros
+  // simulando teto.
+  const radius = body === "sedan" ? 6 : body === "hatch" ? 8 : 5;
+  return (
+    <Group>
+      <Rect
+        x={-width / 2}
+        y={-height / 2}
+        width={width}
+        height={height}
+        fill={color}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        cornerRadius={radius}
+      />
+      {/* Teto (vidros) — retângulo interno. */}
+      <Rect
+        x={-width / 2 + width * 0.18}
+        y={-height / 2 + height * 0.18}
+        width={width * 0.5}
+        height={height * 0.64}
+        fill="rgba(255,255,255,0.32)"
+        listening={false}
+      />
     </Group>
   );
 }
@@ -493,10 +595,12 @@ function LineNode({
   onSelect: () => void;
   onChange: (patch: Partial<SicroObject>) => void;
 }) {
+  const isR = obj.subtype === "r1" || obj.subtype === "r2";
+  const labelFontSize = isR ? 14 : 12;
   return (
     <Group
       id={obj.id}
-      draggable={draggable}
+      draggable={draggable && !obj.locked}
       onClick={onSelect}
       onTap={onSelect}
       onDragEnd={(e) => {
@@ -517,18 +621,69 @@ function LineNode({
         opacity={selected ? 1 : 0.95}
         hitStrokeWidth={Math.max(obj.stroke_width, 12)}
       />
+      {obj.subtype === "arrow" && obj.points.length >= 4 && (
+        <ArrowHead
+          x1={obj.points[obj.points.length - 4]!}
+          y1={obj.points[obj.points.length - 3]!}
+          x2={obj.points[obj.points.length - 2]!}
+          y2={obj.points[obj.points.length - 1]!}
+          color={obj.color ?? "#111827"}
+          size={Math.max(obj.stroke_width * 4, 12)}
+        />
+      )}
       {obj.label && (
         <KonvaText
           text={obj.label}
-          fontSize={12}
+          fontSize={labelFontSize}
           fontStyle="bold"
           fill={obj.color ?? "#1f2937"}
           x={obj.points[0] ?? 0}
-          y={(obj.points[1] ?? 0) - 16}
+          y={(obj.points[1] ?? 0) - 18}
           listening={false}
         />
       )}
     </Group>
+  );
+}
+
+function ArrowHead({
+  x1,
+  y1,
+  x2,
+  y2,
+  color,
+  size,
+}: {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  color: string;
+  size: number;
+}) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len === 0) return null;
+  const ux = dx / len;
+  const uy = dy / len;
+  // 30° on each side of the tip.
+  const rad = (30 * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const back1x = x2 - size * (ux * cos - uy * sin);
+  const back1y = y2 - size * (uy * cos + ux * sin);
+  const back2x = x2 - size * (ux * cos + uy * sin);
+  const back2y = y2 - size * (uy * cos - ux * sin);
+  return (
+    <Line
+      points={[x2, y2, back1x, back1y, back2x, back2y]}
+      closed
+      fill={color}
+      stroke={color}
+      strokeWidth={1}
+      listening={false}
+    />
   );
 }
 
@@ -545,93 +700,193 @@ function MarkerNode({
   onSelect: () => void;
   onChange: (patch: Partial<SicroObject>) => void;
 }) {
-  const size = obj.size;
-  // Render a crossing X with two diagonal strokes, centred at (x,y).
-  if (obj.subtype === "collision_x") {
-    return (
-      <Group
-        id={obj.id}
-        x={obj.x}
-        y={obj.y}
-        draggable={draggable}
-        onClick={onSelect}
-        onTap={onSelect}
-        onDragEnd={(e) =>
-          onChange({ x: e.target.x(), y: e.target.y() } as Partial<SicroObject>)
-        }
-      >
-        <Line
-          points={[-size / 2, -size / 2, size / 2, size / 2]}
-          stroke={obj.color ?? "#dc2626"}
-          strokeWidth={3}
-        />
-        <Line
-          points={[-size / 2, size / 2, size / 2, -size / 2]}
-          stroke={obj.color ?? "#dc2626"}
-          strokeWidth={3}
-        />
-        {obj.label && (
-          <KonvaText
-            text={obj.label}
-            fontSize={11}
-            fontStyle="bold"
-            fill={obj.color ?? "#dc2626"}
-            x={size / 2 + 4}
-            y={-size / 2}
-            listening={false}
-          />
-        )}
-        {selected && (
-          <Rect
-            x={-size / 2 - 4}
-            y={-size / 2 - 4}
-            width={size + 8}
-            height={size + 8}
-            stroke="#0ea5e9"
-            strokeWidth={1}
-            dash={[4, 3]}
-          />
-        )}
-      </Group>
-    );
-  }
-  // Other marker subtypes — a circle for now.
   return (
     <Group
       id={obj.id}
       x={obj.x}
       y={obj.y}
-      draggable={draggable}
+      rotation={obj.rotation ?? 0}
+      draggable={draggable && !obj.locked}
       onClick={onSelect}
       onTap={onSelect}
       onDragEnd={(e) =>
         onChange({ x: e.target.x(), y: e.target.y() } as Partial<SicroObject>)
       }
     >
-      <Rect
-        x={-size / 2}
-        y={-size / 2}
-        width={size}
-        height={size}
-        cornerRadius={size / 2}
-        fill={obj.color ?? "#7c3aed"}
-        stroke={selected ? "#0ea5e9" : "transparent"}
-        strokeWidth={2}
-      />
+      <MarkerGlyph obj={obj} selected={selected} />
       {obj.label && (
         <KonvaText
           text={obj.label}
           fontSize={11}
-          fill="#ffffff"
-          width={size}
-          align="center"
-          y={-6}
-          offsetX={size / 2 - 0}
+          fontStyle="bold"
+          fill={obj.color ?? "#1f2937"}
+          x={obj.size / 2 + 6}
+          y={-obj.size / 2}
+          listening={false}
+        />
+      )}
+      {selected && (
+        <Rect
+          x={-obj.size / 2 - 4}
+          y={-obj.size / 2 - 4}
+          width={obj.size + 8}
+          height={obj.size + 8}
+          stroke="#0ea5e9"
+          strokeWidth={1}
+          dash={[4, 3]}
           listening={false}
         />
       )}
     </Group>
   );
+}
+
+/**
+ * Per-subtype glyph for `marker` objects. Drawn centred at (0,0) — the
+ * parent `Group` handles position/rotation/drag.
+ */
+function MarkerGlyph({
+  obj,
+  selected,
+}: {
+  obj: SicroMarkerObject;
+  selected: boolean;
+}) {
+  const size = obj.size;
+  const color = obj.color ?? "#1f2937";
+  const subtype = obj.subtype;
+
+  if (subtype === "collision_x") {
+    return (
+      <Group>
+        <Line
+          points={[-size / 2, -size / 2, size / 2, size / 2]}
+          stroke={color}
+          strokeWidth={3}
+        />
+        <Line
+          points={[-size / 2, size / 2, size / 2, -size / 2]}
+          stroke={color}
+          strokeWidth={3}
+        />
+      </Group>
+    );
+  }
+
+  if (subtype === "brake_mark" || subtype === "drag_mark") {
+    // Faixa retangular tracejada (frenagem) ou listras curtas (arrasto).
+    const dash = subtype === "brake_mark" ? [16, 8] : [4, 6];
+    return (
+      <Group>
+        <Line
+          points={[-size / 2, -3, size / 2, -3]}
+          stroke={color}
+          strokeWidth={4}
+          dash={dash}
+          lineCap="butt"
+        />
+        <Line
+          points={[-size / 2, 3, size / 2, 3]}
+          stroke={color}
+          strokeWidth={4}
+          dash={dash}
+          lineCap="butt"
+        />
+      </Group>
+    );
+  }
+
+  if (subtype === "fluid" || subtype === "blood") {
+    // Mancha — elipse irregular com cor saturada e contorno suave.
+    return (
+      <Group>
+        <Ellipse
+          radiusX={size * 0.55}
+          radiusY={size * 0.42}
+          rotation={20}
+          fill={color}
+          opacity={0.55}
+          stroke={color}
+          strokeWidth={1}
+        />
+        <Ellipse
+          x={size * 0.18}
+          y={-size * 0.12}
+          radiusX={size * 0.18}
+          radiusY={size * 0.14}
+          fill={color}
+          opacity={0.65}
+        />
+      </Group>
+    );
+  }
+
+  if (subtype === "debris") {
+    // Cluster de triângulos pequenos.
+    const tri = (cx: number, cy: number, s: number) => (
+      <Line
+        key={`${cx},${cy}`}
+        points={[cx, cy - s, cx + s, cy + s, cx - s, cy + s]}
+        closed
+        fill={color}
+        opacity={0.7}
+      />
+    );
+    return (
+      <Group>
+        {tri(-size * 0.25, -size * 0.05, 4)}
+        {tri(size * 0.12, size * 0.15, 5)}
+        {tri(size * 0.32, -size * 0.18, 3.5)}
+        {tri(-size * 0.05, size * 0.3, 3)}
+      </Group>
+    );
+  }
+
+  if (subtype === "pedestrian") {
+    // Cabeça + corpo simples vista de cima.
+    return (
+      <Group>
+        <Circle radius={size * 0.32} fill={color} />
+        <Rect
+          x={-size * 0.18}
+          y={size * 0.15}
+          width={size * 0.36}
+          height={size * 0.5}
+          fill={color}
+          cornerRadius={3}
+        />
+      </Group>
+    );
+  }
+
+  if (subtype === "body") {
+    // Vítima em decúbito — corpo elíptico horizontal.
+    return (
+      <Group>
+        <Ellipse
+          radiusX={size * 0.65}
+          radiusY={size * 0.28}
+          fill={color}
+          opacity={0.85}
+        />
+        <Circle x={-size * 0.55} radius={size * 0.18} fill={color} />
+      </Group>
+    );
+  }
+
+  if (subtype === "victim_point" || subtype === "trace_point") {
+    return (
+      <Circle
+        radius={size / 2}
+        fill={color}
+        stroke={selected ? "#0ea5e9" : "transparent"}
+        strokeWidth={2}
+      />
+    );
+  }
+
+  // Fallback: círculo sólido.
+  return <Circle radius={size / 2} fill={color} />;
 }
 
 function TextNode({
@@ -652,7 +907,8 @@ function TextNode({
       id={obj.id}
       x={obj.x}
       y={obj.y}
-      draggable={draggable}
+      rotation={obj.rotation ?? 0}
+      draggable={draggable && !obj.locked}
       onClick={onSelect}
       onTap={onSelect}
       onDragEnd={(e) =>
@@ -703,7 +959,7 @@ function MeasurementNode({
   return (
     <Group
       id={obj.id}
-      draggable={draggable}
+      draggable={draggable && !obj.locked}
       onClick={onSelect}
       onTap={onSelect}
       onDragEnd={(e) => {
@@ -777,11 +1033,9 @@ function toWorld(stage: Konva.Stage, screen: SicroPoint): SicroPoint {
 
 function isAddTool(tool: Tool): boolean {
   return (
-    tool === "vehicle" ||
-    tool === "line_road" ||
-    tool === "line_r1" ||
-    tool === "line_r2" ||
-    tool === "marker_x" ||
+    tool.startsWith("vehicle") ||
+    tool.startsWith("line_") ||
+    tool.startsWith("marker_") ||
     tool === "text" ||
     tool === "measurement" ||
     tool === "set_scale"

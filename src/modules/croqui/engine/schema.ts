@@ -1,18 +1,29 @@
 /**
- * `.sicrocroqui` schema (Spike E — Croqui Engine).
+ * `.sicrocroqui` schema (Spike E + MVP 6 — Croqui Pericial).
  *
  * The .sicrocroqui envelope is the source of truth for a croqui. PNG is
  * derived, never primary. Keep this file framework-agnostic — no React,
  * no Konva — so the engine is testable and reusable.
  *
- * Compatibility rules (from the architecture doc):
+ * Compatibility rules:
  *   - Only ADD fields. Never rename, never change a type without bumping
- *     `schema_version` (currently "0.1").
+ *     `schema_version`.
  *   - Unknown fields are preserved as-is when a future version reads an
  *     older envelope.
+ *   - MVP 6 (schema_version "0.2") adds:
+ *       - new vehicle body_type values (`sedan` | `suv` | `hatch`
+ *         | `caminhao`);
+ *       - new marker subtypes (`brake_mark` | `drag_mark` | `fluid`
+ *         | `blood` | `debris` | `pedestrian` | `body`);
+ *       - new line subtypes (`arrow` | `sidewalk` | `lane_separator`);
+ *       - `visible?` and `locked?` per object;
+ *       - `category?` for layer-panel grouping;
+ *       - `notes?` for forensic observations;
+ *     All additive — old `.sicrocroqui` files load through `coerceCroquiDoc`
+ *     without intervention.
  */
 
-export const CURRENT_SCHEMA_VERSION = "0.1";
+export const CURRENT_SCHEMA_VERSION = "0.2";
 
 export interface SicroCroquiCanvas {
   /** Logical canvas size in CSS pixels. Konva Stage gets this size. */
@@ -58,7 +69,16 @@ export interface SicroCroquiBackgroundImage {
   locked: boolean;
 }
 
-export type LayerKind = "background" | "objects" | "annotations";
+export type LayerKind =
+  | "background"
+  | "objects"
+  | "annotations"
+  // MVP 6 — categorias dedicadas
+  | "vias"
+  | "veiculos"
+  | "vestigios"
+  | "medidas"
+  | "referenciais";
 
 export interface SicroCroquiLayer {
   id: string;
@@ -78,10 +98,53 @@ export type SicroObjectKind =
   | "measurement";
 
 /** Subtype for `line` objects — selecting the styling/colour palette. */
-export type LineSubtype = "road" | "r1" | "r2" | "lane" | "freehand";
+export type LineSubtype =
+  | "road"
+  | "r1"
+  | "r2"
+  | "lane"
+  | "freehand"
+  // MVP 6 additions
+  | "arrow"
+  | "sidewalk"
+  | "lane_separator";
 
 /** Subtype for `marker` objects. */
-export type MarkerSubtype = "collision_x" | "victim_point" | "trace_point";
+export type MarkerSubtype =
+  | "collision_x"
+  | "victim_point"
+  | "trace_point"
+  // MVP 6 — vestígios
+  | "brake_mark"
+  | "drag_mark"
+  | "fluid"
+  | "blood"
+  | "debris"
+  // MVP 6 — pessoas (renderizadas como marker para reaproveitar drag/select)
+  | "pedestrian"
+  | "body";
+
+/** Vehicle body subtypes (MVP 6 expanded). */
+export type VehicleBodyType =
+  | "car"
+  | "sedan"
+  | "suv"
+  | "hatch"
+  | "truck"
+  | "caminhao"
+  | "moto"
+  | "bike"
+  | "other";
+
+/** Logical category used by the layer panel to group objects (MVP 6). */
+export type ObjectCategory =
+  | "vias"
+  | "veiculos"
+  | "vestigios"
+  | "anotacoes"
+  | "medidas"
+  | "referenciais"
+  | "outros";
 
 interface SicroObjectBase {
   id: string;
@@ -90,6 +153,14 @@ interface SicroObjectBase {
   label?: string | null;
   color?: string | null;
   z?: number;
+  /** MVP 6: object-level toggle (separate from layer visibility). */
+  visible?: boolean;
+  /** MVP 6: prevent drag / transform when true. */
+  locked?: boolean;
+  /** MVP 6: free-form forensic observation. */
+  notes?: string | null;
+  /** MVP 6: logical grouping for the layer panel. */
+  category?: ObjectCategory;
 }
 
 export interface SicroVehicleObject extends SicroObjectBase {
@@ -99,8 +170,8 @@ export interface SicroVehicleObject extends SicroObjectBase {
   width: number;
   height: number;
   rotation: number;
-  /** Useful when the perito needs different styles for car/truck/motorbike. */
-  body_type?: "car" | "truck" | "moto" | "bike" | "other";
+  /** Body subtype — selects the rendered silhouette. */
+  body_type?: VehicleBodyType;
 }
 
 export interface SicroLineObject extends SicroObjectBase {
