@@ -1,0 +1,77 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--sicro-bg);
+  overflow: hidden;
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--sicro-divider);
+  flex-shrink: 0;
+  background: var(--sicro-surface-1);
+}
+
+.backBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 30px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--sicro-fg-muted);
+  font-size: var(--text-sm);
+}
+.backBtn:hover {
+  background: var(--sicro-surface-2);
+  color: var(--sicro-fg);
+}
+
+.titleInput {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  color: var(--sicro-fg);
+  font-size: var(--text-md);
+  font-weight: 500;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+}
+.titleInput:hover {
+  background: var(--sicro-surface-2);
+}
+.titleInput:focus {
+  outline: 2px solid var(--sicro-accent);
+  background: var(--sicro-surface-2);
+}
+
+.savedBadge {
+  font-size: var(--text-xs);
+  color: var(--sicro-fg-dim);
+  font-family: var(--font-mono);
+}
+
+.body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+.editorRegion {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.errorBanner {
+  background: rgba(239, 95, 95, 0.1);
+  border-bottom: 1px solid rgba(239, 95, 95, 0.3);
+  color: var(--sicro-danger);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+}

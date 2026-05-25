@@ -34,11 +34,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
+            // workspace / occurrence
             commands::workspace_commands::create_occurrence,
             commands::workspace_commands::open_occurrence,
             commands::workspace_commands::get_occurrence,
             commands::workspace_commands::list_recent_occurrences,
             commands::workspace_commands::forget_recent_occurrence,
+            // laudo (Spike B)
+            commands::laudo_commands::create_laudo,
+            commands::laudo_commands::list_laudos,
+            commands::laudo_commands::read_laudo,
+            commands::laudo_commands::save_laudo,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SICRO Desktop");

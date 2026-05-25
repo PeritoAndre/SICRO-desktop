@@ -1,0 +1,166 @@
+/*
+ * EditorPage — visual wrapper for the A4 sheet.
+ *
+ * The outer scroll area paints the "office workspace" gray and centers the
+ * white sheet. The sheet itself follows institutional margins (doc 04 §20):
+ *   top 2.5cm, left 3cm, right 2cm, bottom 2cm.
+ *
+ * We measure in cm so when the user prints/exports the proportions stay
+ * faithful. Inside the page the TipTap content sits in `--font-doc` (serif).
+ */
+
+.scroll {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  background: var(--doc-workspace-bg);
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6) var(--space-6) var(--space-12);
+}
+
+.page {
+  width: 21cm;
+  min-height: 29.7cm;
+  background: var(--doc-page-bg);
+  color: var(--doc-page-fg);
+  box-shadow: var(--doc-shadow-elev);
+  padding: 2.5cm 2cm 2cm 3cm;
+  border-radius: 2px;
+  position: relative;
+  font-family: var(--font-doc);
+  font-size: 12pt;
+  line-height: 1.5;
+}
+
+/* The TipTap editor renders a contenteditable with class `.ProseMirror`.
+   We expose a stable class via editorProps.attributes.class instead. */
+.editor :global(.sicro-editor-content) {
+  outline: none;
+  min-height: 24cm;
+}
+
+.editor :global(.sicro-editor-content > *:first-child) {
+  margin-top: 0;
+}
+
+.editor :global(.sicro-editor-content h1) {
+  font-size: 18pt;
+  text-align: center;
+  font-weight: 700;
+  margin: 1em 0 0.8em;
+}
+.editor :global(.sicro-editor-content h2) {
+  font-size: 14pt;
+  font-weight: 700;
+  margin: 1.2em 0 0.5em;
+}
+.editor :global(.sicro-editor-content h3) {
+  font-size: 12pt;
+  font-weight: 700;
+  margin: 1em 0 0.4em;
+}
+.editor :global(.sicro-editor-content p) {
+  margin: 0 0 0.6em;
+  text-align: justify;
+}
+.editor :global(.sicro-editor-content ul),
+.editor :global(.sicro-editor-content ol) {
+  padding-left: 1.5em;
+  margin: 0 0 0.6em;
+}
+
+/* Figure */
+.editor :global(figure[data-sicro-figure]) {
+  margin: 1.4em auto;
+  text-align: center;
+}
+.editor :global(figure[data-sicro-figure] img) {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--doc-border);
+}
+.editor :global(figure[data-sicro-figure] figcaption) {
+  font-size: 10pt;
+  color: var(--doc-caption-fg);
+  font-style: italic;
+  margin-top: 0.4em;
+  text-align: center;
+}
+
+/* Table */
+.editor :global(table[data-sicro-table]) {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 11pt;
+  margin: 1em 0;
+  table-layout: fixed;
+}
+.editor :global(table[data-sicro-table] td),
+.editor :global(table[data-sicro-table] th) {
+  border: 1px solid #444;
+  padding: 4px 8px;
+  vertical-align: top;
+}
+.editor :global(table[data-sicro-table] th) {
+  background: #ececec;
+  font-weight: 600;
+}
+
+/* Storyboard */
+.editor :global(section[data-sicro-storyboard]) {
+  border: 1px dashed #c0c0c0;
+  padding: 8px 12px;
+  margin: 1em 0;
+}
+.editor :global(article[data-sicro-storyboard-item]) {
+  display: grid;
+  grid-template-columns: 5cm 1fr;
+  gap: 12px;
+  align-items: start;
+  padding: 8px 0;
+  border-bottom: 1px solid #eee;
+}
+.editor :global(article[data-sicro-storyboard-item]:last-child) {
+  border-bottom: none;
+}
+.editor :global(article[data-sicro-storyboard-item] img) {
+  width: 100%;
+  border: 1px solid var(--doc-border);
+}
+.editor :global([data-sicro-storyboard-time]) {
+  font-family: var(--font-mono);
+  font-size: 11pt;
+  font-weight: 600;
+}
+.editor :global([data-sicro-storyboard-frame]) {
+  font-family: var(--font-mono);
+  font-size: 10pt;
+  color: var(--doc-page-muted);
+  margin-bottom: 4px;
+}
+.editor :global([data-sicro-storyboard-description] p) {
+  margin: 0;
+  font-size: 11pt;
+}
+
+/* System data inline */
+.editor :global(span[data-sicro-system-data]) {
+  background: rgba(230, 180, 80, 0.18);
+  border-bottom: 1px dotted #b07c20;
+  padding: 0 2px;
+  cursor: pointer;
+}
+.editor :global(span[data-sicro-system-data][data-review-status="reviewed"]) {
+  background: rgba(53, 196, 122, 0.12);
+  border-bottom-color: #1f7a44;
+}
+
+/* Placeholder */
+.editor :global(.sicro-editor-content p.is-editor-empty:first-child::before) {
+  content: attr(data-placeholder);
+  float: left;
+  color: #9aa3b1;
+  pointer-events: none;
+  height: 0;
+}

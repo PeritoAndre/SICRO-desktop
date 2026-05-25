@@ -1,0 +1,115 @@
+.inspector {
+  width: 320px;
+  background: var(--sicro-surface-1);
+  border-left: 1px solid var(--sicro-divider);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--sicro-divider);
+}
+.tab {
+  flex: 1;
+  padding: var(--space-3) var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--sicro-fg-muted);
+  cursor: pointer;
+  text-align: center;
+  transition: color var(--t-fast), background var(--t-fast);
+  border-bottom: 2px solid transparent;
+}
+.tab:hover {
+  color: var(--sicro-fg);
+}
+.tabActive {
+  color: var(--sicro-accent);
+  border-bottom-color: var(--sicro-accent);
+}
+
+.body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.sectionTitle {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sicro-fg-dim);
+  margin: 0 0 var(--space-2);
+  font-weight: 500;
+}
+
+.metaList {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+}
+.metaList dt {
+  color: var(--sicro-fg-dim);
+}
+.metaList dd {
+  color: var(--sicro-fg);
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  word-break: break-all;
+}
+
+.outlineList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+}
+.outlineItem {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  cursor: default;
+  color: var(--sicro-fg-muted);
+}
+.outlineLevel1 { padding-left: 0; color: var(--sicro-fg); font-weight: 500; }
+.outlineLevel2 { padding-left: var(--space-3); }
+.outlineLevel3 { padding-left: var(--space-5); color: var(--sicro-fg-dim); }
+
+.warningList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.warning {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: rgba(230, 180, 80, 0.08);
+  border-left: 3px solid var(--sicro-warning);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.warning.info {
+  background: rgba(90, 169, 230, 0.08);
+  border-left-color: var(--sicro-info);
+}
+.warningMessage {
+  font-size: var(--text-sm);
+  color: var(--sicro-fg);
+}
+.warningHint {
+  font-size: var(--text-xs);
+  color: var(--sicro-fg-dim);
+}
+
+.empty {
+  font-size: var(--text-sm);
+  color: var(--sicro-fg-dim);
+  font-style: italic;
+}

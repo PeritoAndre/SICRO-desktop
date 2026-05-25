@@ -18,10 +18,16 @@ struct Migration {
     sql: &'static str,
 }
 
-const MIGRATIONS: &[Migration] = &[Migration {
-    version: "001_initial",
-    sql: include_str!("../../migrations/001_initial.sql"),
-}];
+const MIGRATIONS: &[Migration] = &[
+    Migration {
+        version: "001_initial",
+        sql: include_str!("../../migrations/001_initial.sql"),
+    },
+    Migration {
+        version: "002_laudos",
+        sql: include_str!("../../migrations/002_laudos.sql"),
+    },
+];
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
     // schema_migrations is also created by 001 itself, but we need to read

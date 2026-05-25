@@ -2,6 +2,7 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./AppShell";
 import { WorkspaceProvider } from "./WorkspaceProvider";
 import { HomeView } from "@modules/home/HomeView";
+import { LaudoModule } from "@modules/laudo/LaudoModule";
 import { PlaceholderModule } from "@modules/placeholders/PlaceholderModule";
 
 export function App() {
@@ -20,15 +21,7 @@ export function App() {
                 />
               }
             />
-            <Route
-              path="/laudo"
-              element={
-                <PlaceholderModule
-                  module="Laudo"
-                  scheduled="MVP 2 (após Spike B — Document Engine)"
-                />
-              }
-            />
+            <Route path="/laudo" element={<LaudoModule />} />
             <Route
               path="/croqui"
               element={
