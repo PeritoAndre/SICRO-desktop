@@ -15,7 +15,11 @@ import {
 } from "lucide-react";
 import { commands } from "@core/commands";
 import { toSicroError } from "@core/errors";
-import { renderSicroDocToHtml, type SicroDoc } from "../document-engine";
+import {
+  loadBrandingAssets,
+  renderSicroDocToHtml,
+  type SicroDoc,
+} from "../document-engine";
 import { formatRelative } from "@core/formatters";
 import type { Export } from "@domain/export";
 import styles from "./ExportMenu.module.css";
@@ -27,6 +31,8 @@ interface ExportMenuProps {
    *  unambiguous WHICH laudo will be exported (Spike C runtime feedback). */
   laudoTitle?: string;
   doc: SicroDoc | null;
+  /** Active occurrence — feeds the institutional header (MVP 2). */
+  occurrence?: Record<string, unknown> | null;
 }
 
 type Status =
@@ -40,6 +46,7 @@ export function ExportMenu({
   laudoId,
   laudoTitle,
   doc,
+  occurrence,
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
@@ -78,7 +85,15 @@ export function ExportMenu({
         // DOCX reads the .sicrodoc directly on the Rust side — no HTML needed.
         result = await commands.exportLaudoDocx(workspacePath, laudoId);
       } else {
-        const html = renderSicroDocToHtml(doc, { fullDocument: true });
+        // Branding assets are baked into the HTML as data URIs so the Edge
+        // headless print-to-pdf step (which reads the HTML from a temp file)
+        // can show the coats of arms without resolving /branding/ paths.
+        const branding = await loadBrandingAssets();
+        const html = renderSicroDocToHtml(doc, {
+          fullDocument: true,
+          occurrence: occurrence ?? null,
+          branding,
+        });
         result =
           target === "pdf"
             ? await commands.exportLaudoPdf(workspacePath, laudoId, html)

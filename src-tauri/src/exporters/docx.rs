@@ -14,6 +14,13 @@
 //!   - `render_list` no longer carries the dead code that was producing
 //!     duplicate bullets.
 //!
+//! MVP 2 ajuste runtime 1.2:
+//!   - Page margins are read from `envelope.layout.page.margins` (the same
+//!     resolver used by the editor and the HTML/PDF renderer). When the
+//!     envelope does not carry a per-laudo override, the institutional
+//!     template default is applied. Values in cm are converted to twips
+//!     (1 cm = 567 twips) for docx-rs `PageMargin`.
+//!
 //! Limitations still in place:
 //!   - Images are NOT embedded (only captions / placeholders).
 //!   - SystemData inline marks lose the review state (rendered as text).
@@ -38,7 +45,23 @@ pub fn render_doc_to_docx(envelope: &Value, target: &Path) -> Result<()> {
         .ok_or_else(|| SicroError::Validation("sicrodoc missing 'content' field".to_string()))?;
     let blocks = children(content_doc);
 
-    let mut docx = Docx::new().add_paragraph(title_paragraph(&title));
+    // MVP 2: register institutional Header/Footer (best-effort).
+    let template_id = envelope
+        .get("layout")
+        .and_then(|l| l.get("institutional_template"))
+        .and_then(Value::as_str);
+    let metadata = envelope
+        .get("metadata")
+        .and_then(Value::as_object)
+        .cloned();
+
+    let mut docx = build_institutional_chrome(Docx::new(), template_id, metadata.as_ref());
+
+    // Apply effective page margins. The resolution order matches the editor:
+    //   envelope.layout.page.margins  >  institutional template default  >  SICRO default.
+    docx = docx.page_margin(resolve_page_margin(envelope, template_id));
+
+    docx = docx.add_paragraph(title_paragraph(&title));
 
     for node in &blocks {
         docx = render_top_level_block(docx, node);
@@ -58,6 +81,151 @@ pub fn render_doc_to_docx(envelope: &Value, target: &Path) -> Result<()> {
 }
 
 // ===========================================================================
+// MVP 2 ajuste 1.2 — page margins
+
+/// 1 cm in twentieths of a point (twips). Word page geometry is expressed in
+/// twips, so this conversion is exact for the values we accept.
+const TWIPS_PER_CM: f64 = 567.0;
+
+fn cm_to_twips(cm: f64) -> i32 {
+    (cm * TWIPS_PER_CM).round() as i32
+}
+
+/// Parse a CSS length string ("3cm", "2.5cm", "25mm", "30pt", "1in").
+/// Defaults: bare numbers are interpreted as cm. Returns None for invalid input.
+fn parse_length_cm(value: &str) -> Option<f64> {
+    let trimmed = value.trim().replace(',', ".");
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Find the unit suffix.
+    let (num_part, unit) = trimmed
+        .find(|c: char| c.is_alphabetic())
+        .map(|idx| (&trimmed[..idx], &trimmed[idx..]))
+        .unwrap_or((trimmed.as_str(), "cm"));
+    let n: f64 = num_part.trim().parse().ok()?;
+    let cm = match unit.trim().to_lowercase().as_str() {
+        "cm" | "" => n,
+        "mm" => n / 10.0,
+        "pt" => n / 28.3464567,
+        "in" => n * 2.54,
+        "px" => n / 37.795275591, // 96 dpi
+        _ => return None,
+    };
+    Some(cm)
+}
+
+/// Resolve effective margins from envelope.layout.page.margins or fall back to
+/// the institutional template defaults. Keeps the DOCX consistent with the
+/// editor and the HTML/PDF renderer.
+fn resolve_page_margin(envelope: &Value, template_id: Option<&str>) -> PageMargin {
+    // Template fallback (cm). Mirrors `institutional-templates.ts`.
+    let (mut top, mut right, mut bottom, mut left) = match template_id.unwrap_or("pca_padrao_v1")
+    {
+        "pca_padrao_v1" => (3.0_f64, 2.0_f64, 2.5_f64, 3.5_f64),
+        _ => (2.5_f64, 2.5_f64, 2.5_f64, 2.5_f64),
+    };
+
+    // Per-laudo override (envelope.layout.page.margins) takes precedence when
+    // the four sides are present and parse cleanly.
+    if let Some(m) = envelope
+        .get("layout")
+        .and_then(|l| l.get("page"))
+        .and_then(|p| p.get("margins"))
+    {
+        let parsed = (
+            m.get("top").and_then(Value::as_str).and_then(parse_length_cm),
+            m.get("right").and_then(Value::as_str).and_then(parse_length_cm),
+            m.get("bottom").and_then(Value::as_str).and_then(parse_length_cm),
+            m.get("left").and_then(Value::as_str).and_then(parse_length_cm),
+        );
+        if let (Some(t), Some(r), Some(b), Some(l)) = parsed {
+            top = t;
+            right = r;
+            bottom = b;
+            left = l;
+        }
+    }
+
+    PageMargin::new()
+        .top(cm_to_twips(top))
+        .right(cm_to_twips(right))
+        .bottom(cm_to_twips(bottom))
+        .left(cm_to_twips(left))
+}
+
+// ===========================================================================
+// MVP 2 — institutional chrome (header / footer)
+
+/// Apply Header + Footer to the docx based on the institutional template id.
+/// Marca lateral é intencionalmente omitida no DOCX (texto rotacionado em
+/// margem é frágil entre Word desktop / LibreOffice / Office Mobile;
+/// preferimos pular a representar mal).
+fn build_institutional_chrome(
+    docx: Docx,
+    template_id: Option<&str>,
+    metadata: Option<&serde_json::Map<String, Value>>,
+) -> Docx {
+    // Spike B did not set `institutional_template`; we default to PCA padrão.
+    let id = template_id.unwrap_or("pca_padrao_v1");
+    match id {
+        "pca_padrao_v1" => pca_padrao_v1_chrome(docx, metadata),
+        _ => docx,
+    }
+}
+
+fn pca_padrao_v1_chrome(
+    docx: Docx,
+    metadata: Option<&serde_json::Map<String, Value>>,
+) -> Docx {
+    let brand_lines = [
+        "GOVERNO DO ESTADO DO AMAPÁ",
+        "POLÍCIA CIENTÍFICA DO AMAPÁ",
+        "DEPARTAMENTO DE CRIMINALÍSTICA",
+    ];
+
+    let mut header = Header::new();
+    for line in brand_lines.iter() {
+        header = header.add_paragraph(
+            Paragraph::new()
+                .align(AlignmentType::Center)
+                .add_run(Run::new().add_text(*line).bold().size(20)),
+        );
+    }
+
+    // Single optional line with "Laudo nº" if present in metadata.
+    if let Some(numero) = metadata
+        .and_then(|m| m.get("numero_laudo"))
+        .and_then(Value::as_str)
+    {
+        if !numero.trim().is_empty() {
+            header = header.add_paragraph(
+                Paragraph::new()
+                    .align(AlignmentType::Right)
+                    .add_run(
+                        Run::new()
+                            .add_text(format!("Laudo nº {}", numero))
+                            .size(18),
+                    ),
+            );
+        }
+    }
+
+    let footer = Footer::new().add_paragraph(
+        Paragraph::new()
+            .align(AlignmentType::Center)
+            .add_run(
+                Run::new()
+                    .add_text("Documento gerado pelo SICRO 2.0 — versão preliminar (MVP 2).")
+                    .size(16)
+                    .italic(),
+            ),
+    );
+
+    docx.header(header).footer(footer)
+}
+
+// ===========================================================================
 // Block dispatch (top level)
 
 fn render_top_level_block(docx: Docx, node: &Value) -> Docx {
@@ -69,6 +237,9 @@ fn render_top_level_block(docx: Docx, node: &Value) -> Docx {
         "table" => render_table(docx, node),
         "figure" => render_figure_top(docx, node),
         "storyboard" => render_storyboard_top(docx, node),
+        // MVP 2 — institutional blocks
+        "quesitoList" => render_quesito_list(docx, node),
+        "signature" => render_signature(docx, node),
         "horizontalRule" => docx.add_paragraph(
             Paragraph::new().add_run(Run::new().add_text("────────────────────────────")),
         ),
@@ -316,6 +487,18 @@ fn build_table_cell(cell_node: &Value) -> TableCell {
                     any_added = true;
                 }
             }
+            "quesitoList" => {
+                for p in quesito_list_to_paragraphs(&inner) {
+                    cell = cell.add_paragraph(p);
+                    any_added = true;
+                }
+            }
+            "signature" => {
+                for p in signature_to_paragraphs(&inner) {
+                    cell = cell.add_paragraph(p);
+                    any_added = true;
+                }
+            }
             _ => {
                 cell = cell.add_paragraph(fallback_paragraph(&inner));
                 any_added = true;
@@ -448,6 +631,145 @@ fn storyboard_item_to_row(item: &Value) -> TableRow {
     }
 
     TableRow::new(vec![meta_cell, desc_cell])
+}
+
+// ===========================================================================
+// Quesito (MVP 2)
+
+fn render_quesito_list(mut docx: Docx, list_node: &Value) -> Docx {
+    for p in quesito_list_to_paragraphs(list_node) {
+        docx = docx.add_paragraph(p);
+    }
+    docx
+}
+
+fn quesito_list_to_paragraphs(list_node: &Value) -> Vec<Paragraph> {
+    let mut out = Vec::new();
+    for (idx, item) in children(list_node).into_iter().enumerate() {
+        let mut question = String::new();
+        let mut answer = String::new();
+        for child in children(&item) {
+            match type_of(&child) {
+                "quesitoQuestion" => collect_text(&child, &mut question),
+                "quesitoAnswer" => collect_text(&child, &mut answer),
+                _ => {}
+            }
+        }
+
+        // "Quesito N: <pergunta>"
+        let mut q = Paragraph::new().align(AlignmentType::Justified);
+        q = q.add_run(
+            Run::new()
+                .add_text(format!("Quesito {}: ", idx + 1))
+                .bold(),
+        );
+        if question.trim().is_empty() {
+            q = q.add_run(Run::new().add_text("(sem pergunta)"));
+        } else {
+            q = q.add_run(Run::new().add_text(question));
+        }
+        out.push(q);
+
+        // "Resposta: <resposta>"
+        let mut a = Paragraph::new()
+            .align(AlignmentType::Justified)
+            .indent(Some(360), None, None, None);
+        a = a.add_run(Run::new().add_text("Resposta: ").bold());
+        if answer.trim().is_empty() {
+            a = a.add_run(Run::new().add_text("(a preencher)").italic());
+        } else {
+            a = a.add_run(Run::new().add_text(answer));
+        }
+        out.push(a);
+
+        // Spacer
+        out.push(empty_paragraph());
+    }
+    out
+}
+
+// ===========================================================================
+// Signature (MVP 2)
+
+fn render_signature(mut docx: Docx, sig_node: &Value) -> Docx {
+    for p in signature_to_paragraphs(sig_node) {
+        docx = docx.add_paragraph(p);
+    }
+    docx
+}
+
+fn signature_to_paragraphs(sig_node: &Value) -> Vec<Paragraph> {
+    let attrs = sig_node.get("attrs");
+    let city = attrs
+        .and_then(|a| a.get("city"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let uf = attrs
+        .and_then(|a| a.get("uf"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let date = attrs
+        .and_then(|a| a.get("date"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let name = attrs
+        .and_then(|a| a.get("name"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let role = attrs
+        .and_then(|a| a.get("role"))
+        .and_then(Value::as_str)
+        .unwrap_or("Perito Criminal");
+
+    let place_line = if !city.is_empty() || !uf.is_empty() {
+        format!("{} - {}, {}.", city, uf, format_pt_br_date(date))
+    } else {
+        format_pt_br_date(date)
+    };
+
+    vec![
+        // empty spacer
+        empty_paragraph(),
+        // Place + date — right-aligned per institutional convention
+        Paragraph::new()
+            .align(AlignmentType::Right)
+            .add_run(Run::new().add_text(place_line)),
+        // Blank line for the signature
+        empty_paragraph(),
+        // Rule
+        Paragraph::new()
+            .align(AlignmentType::Center)
+            .add_run(Run::new().add_text("_______________________________")),
+        // Name (bold, centered)
+        Paragraph::new()
+            .align(AlignmentType::Center)
+            .add_run(Run::new().add_text(if name.is_empty() {
+                "(nome do perito)".to_string()
+            } else {
+                name.to_string()
+            }).bold()),
+        // Role (italic, centered)
+        Paragraph::new()
+            .align(AlignmentType::Center)
+            .add_run(Run::new().add_text(role).italic()),
+    ]
+}
+
+fn format_pt_br_date(iso: &str) -> String {
+    // Accept "YYYY-MM-DD" or full ISO; output "DD/MM/YYYY". Empty input
+    // returns a blank placeholder.
+    if iso.is_empty() {
+        return "______ / ______ / ______".to_string();
+    }
+    if iso.len() < 10 {
+        return iso.to_string();
+    }
+    let date_part = &iso[..10];
+    let parts: Vec<&str> = date_part.split('-').collect();
+    if parts.len() != 3 {
+        return date_part.to_string();
+    }
+    format!("{}/{}/{}", parts[2], parts[1], parts[0])
 }
 
 /// Flatten a storyboard into a sequence of paragraphs (used when the

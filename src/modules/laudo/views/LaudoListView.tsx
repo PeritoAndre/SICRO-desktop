@@ -15,8 +15,10 @@ import { StatusPill } from "@components/StatusPill/StatusPill";
 import { formatRelative } from "@core/formatters";
 import { useLaudoStore } from "../store/laudoStore";
 import { useWorkspaceStore } from "@stores/workspaceStore";
+import { NewLaudoDialog } from "../components/NewLaudoDialog";
+import type { OccurrenceContext } from "../document-engine";
 import type { Laudo, LaudoStatus } from "@domain/laudo";
-import type { OccurrenceStatus } from "@domain/occurrence";
+import type { Occurrence, OccurrenceStatus } from "@domain/occurrence";
 import styles from "./LaudoListView.module.css";
 
 interface LaudoListViewProps {
@@ -35,25 +37,20 @@ export function LaudoListView({
   const isMutating = useLaudoStore((s) => s.isMutating);
   const error = useLaudoStore((s) => s.lastError);
   const loadList = useLaudoStore((s) => s.loadList);
-  const createLaudo = useLaudoStore((s) => s.createLaudo);
   const activeOccurrence = useWorkspaceStore((s) => s.activeOccurrence);
 
-  const [creating, setCreating] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
     void loadList(workspacePath);
   }, [workspacePath, loadList]);
 
-  const handleCreate = async () => {
-    setCreating(true);
-    try {
-      const title = buildSuggestedTitle(activeOccurrence?.tipo_pericia ?? null);
-      await createLaudo(workspacePath, { title, template_id: "documento_livre" });
-      onCreate();
-    } finally {
-      setCreating(false);
-    }
-  };
+  const suggestedTitle = buildSuggestedTitle(
+    activeOccurrence?.tipo_pericia ?? null,
+  );
+  const occurrenceContext = activeOccurrence
+    ? toOccurrenceContext(activeOccurrence)
+    : null;
 
   return (
     <div className={styles.wrap}>
@@ -70,10 +67,10 @@ export function LaudoListView({
           <Button
             variant="primary"
             leftIcon={<Plus size={16} />}
-            onClick={handleCreate}
-            disabled={creating || isMutating}
+            onClick={() => setDialogOpen(true)}
+            disabled={isMutating}
           >
-            {creating ? "Criando…" : "Novo laudo"}
+            Novo laudo
           </Button>
         </header>
 
@@ -88,8 +85,8 @@ export function LaudoListView({
               <Button
                 variant="primary"
                 leftIcon={<Plus size={16} />}
-                onClick={handleCreate}
-                disabled={creating || isMutating}
+                onClick={() => setDialogOpen(true)}
+                disabled={isMutating}
               >
                 Criar primeiro laudo
               </Button>
@@ -117,8 +114,32 @@ export function LaudoListView({
           </div>
         )}
       </div>
+
+      <NewLaudoDialog
+        open={dialogOpen}
+        workspacePath={workspacePath}
+        suggestedTitle={suggestedTitle}
+        occurrence={occurrenceContext}
+        onClose={() => setDialogOpen(false)}
+        onCreated={() => {
+          onCreate();
+        }}
+      />
     </div>
   );
+}
+
+function toOccurrenceContext(o: Occurrence): OccurrenceContext {
+  return {
+    numero_bo: o.numero_bo,
+    protocolo: o.protocolo,
+    requisicao: o.requisicao,
+    oficio: o.oficio,
+    tipo_pericia: o.tipo_pericia,
+    municipio: o.municipio,
+    data_fato: o.data_fato,
+    peritos: o.peritos,
+  };
 }
 
 function buildSuggestedTitle(tipo: string | null): string {

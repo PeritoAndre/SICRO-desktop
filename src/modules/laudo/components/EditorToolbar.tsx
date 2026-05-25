@@ -15,7 +15,9 @@ import {
   Bold,
   Code,
   Eye,
+  FileSignature,
   Film,
+  HelpCircle,
   Image as ImageIcon,
   Italic,
   List,
@@ -43,6 +45,7 @@ interface EditorToolbarProps {
   laudoId?: string;
   laudoTitle?: string;
   doc?: SicroDoc | null;
+  occurrence?: Record<string, unknown> | null;
 }
 
 export function EditorToolbar({
@@ -55,6 +58,7 @@ export function EditorToolbar({
   laudoId,
   laudoTitle,
   doc,
+  occurrence,
 }: EditorToolbarProps) {
   if (!editor) {
     return <div className={styles.toolbar} aria-hidden />;
@@ -219,6 +223,22 @@ export function EditorToolbar({
         <button
           type="button"
           className={styles.btnLabel}
+          onClick={() => editor.chain().focus().insertQuesitoList(1).run()}
+          title="Inserir bloco de quesitos"
+        >
+          <HelpCircle size={14} /> Quesito
+        </button>
+        <button
+          type="button"
+          className={styles.btnLabel}
+          onClick={() => editor.chain().focus().insertSignature().run()}
+          title="Inserir bloco de assinatura"
+        >
+          <FileSignature size={14} /> Assinatura
+        </button>
+        <button
+          type="button"
+          className={styles.btnLabel}
           onClick={() =>
             editor.chain().focus().insertSystemData({
               source: "occurrence",
@@ -248,6 +268,7 @@ export function EditorToolbar({
           laudoId={laudoId}
           laudoTitle={laudoTitle}
           doc={doc ?? null}
+          occurrence={occurrence ?? null}
         />
       )}
 

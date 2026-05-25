@@ -13,11 +13,27 @@ import type { JSONContent } from "@tiptap/core";
 
 export const SCHEMA_VERSION = "1.0.0";
 
+/** Margens de página em string (cm, mm ou pt). MVP 2.1 usa sempre cm. */
+export interface SicroDocPageMargins {
+  top: string;
+  right: string;
+  bottom: string;
+  left: string;
+}
+
+export interface SicroDocPage {
+  /** Override das margens definidas pelo institutional_template. Quando
+   *  ausente, o template manda. */
+  margins?: SicroDocPageMargins;
+}
+
 export interface SicroDocLayout {
   page_size: "A4";
   orientation: "portrait" | "landscape";
   /** Optional id of an institutional template (header/footer/side-mark). */
   institutional_template?: string;
+  /** Override de margens e outras propriedades de página (MVP 2 ajuste). */
+  page?: SicroDocPage;
 }
 
 export interface SicroDocMetadata {

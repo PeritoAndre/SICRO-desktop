@@ -13,6 +13,7 @@ import { EditorToolbar } from "../components/EditorToolbar";
 import { Inspector } from "../components/Inspector";
 import { HtmlPreview } from "../components/HtmlPreview";
 import { useLaudoStore } from "../store/laudoStore";
+import { useWorkspaceStore } from "@stores/workspaceStore";
 import { laudoExtensions, type SicroDoc } from "../document-engine";
 import { formatRelative } from "@core/formatters";
 import { toSicroError } from "@core/errors";
@@ -29,6 +30,7 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
   const isSaving = useLaudoStore((s) => s.isMutating);
   const saveCurrent = useLaudoStore((s) => s.saveCurrent);
   const lastError = useLaudoStore((s) => s.lastError);
+  const activeOccurrence = useWorkspaceStore((s) => s.activeOccurrence);
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [liveContent, setLiveContent] = useState<JSONContent | null>(null);
@@ -154,6 +156,9 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
         laudoId={currentLaudo.id}
         laudoTitle={currentLaudo.title}
         doc={docForInspector}
+        occurrence={
+          activeOccurrence as unknown as Record<string, unknown> | null
+        }
       />
 
       {(localError || lastError?.message) && (
@@ -162,11 +167,16 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
 
       <div className={styles.body}>
         <div className={styles.editorRegion}>
-          <EditorPage editor={editor} />
+          <EditorPage
+            editor={editor}
+            doc={docForInspector}
+            occurrence={activeOccurrence}
+          />
           {previewOpen && (
             <HtmlPreview
               doc={docForInspector}
               liveContent={liveContent}
+              occurrence={activeOccurrence}
               onClose={() => setPreviewOpen(false)}
             />
           )}

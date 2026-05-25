@@ -19,7 +19,18 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import Placeholder from "@tiptap/extension-placeholder";
-import { FigCaption, Figure, Storyboard, StoryboardItem, SystemData } from "./nodes";
+import {
+  FigCaption,
+  Figure,
+  QuesitoAnswer,
+  QuesitoItem,
+  QuesitoList,
+  QuesitoQuestion,
+  Signature,
+  Storyboard,
+  StoryboardItem,
+  SystemData,
+} from "./nodes";
 
 export function laudoExtensions(opts?: { placeholder?: string }): Extensions {
   return [
@@ -53,6 +64,12 @@ export function laudoExtensions(opts?: { placeholder?: string }): Extensions {
     Storyboard,
     StoryboardItem,
     SystemData,
+    // MVP 2 — institutional blocks
+    QuesitoList,
+    QuesitoItem,
+    QuesitoQuestion,
+    QuesitoAnswer,
+    Signature,
     Placeholder.configure({
       placeholder:
         opts?.placeholder ?? "Comece a escrever o laudo ou insira uma seção…",
