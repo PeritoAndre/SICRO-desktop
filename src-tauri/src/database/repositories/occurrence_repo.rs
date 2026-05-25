@@ -9,12 +9,16 @@ use uuid::Uuid;
 use crate::error::{Result, SicroError};
 use crate::models::{Occurrence, OccurrenceStatus};
 
+/// Column order MUST match the `params![...]` order in `insert` / `update_full`
+/// and the field order accessed in `row_to_occurrence`.
 const COLUMNS: &str = "
     id, numero_bo, protocolo, requisicao, oficio, delegacia,
     tipo_pericia, natureza, municipio, bairro, logradouro, referencia,
     latitude, longitude,
     data_fato, data_acionamento, data_chegada, data_encerramento,
-    peritos, status, created_at, updated_at
+    peritos, status, created_at, updated_at,
+    import_id, original_mobile_id, primary_accuracy_m, resultado,
+    raw_case_json, raw_metadata_json, raw_location_json
 ";
 
 pub fn insert(conn: &Connection, occ: &Occurrence) -> Result<()> {
@@ -22,7 +26,8 @@ pub fn insert(conn: &Connection, occ: &Occurrence) -> Result<()> {
         &format!(
             "INSERT INTO occurrences ({COLUMNS}) VALUES \
              (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, \
-              ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)"
+              ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, \
+              ?23, ?24, ?25, ?26, ?27, ?28, ?29)"
         ),
         params![
             occ.id.to_string(),
@@ -47,6 +52,13 @@ pub fn insert(conn: &Connection, occ: &Occurrence) -> Result<()> {
             occ.status.as_str(),
             occ.created_at.to_rfc3339(),
             occ.updated_at.to_rfc3339(),
+            occ.import_id.map(|u| u.to_string()),
+            occ.original_mobile_id,
+            occ.primary_accuracy_m,
+            occ.resultado,
+            occ.raw_case_json,
+            occ.raw_metadata_json,
+            occ.raw_location_json,
         ],
     )?;
     Ok(())
@@ -73,6 +85,11 @@ fn row_to_occurrence(row: &Row<'_>) -> rusqlite::Result<Occurrence> {
     let status_str: String = row.get("status")?;
     let status = OccurrenceStatus::parse(&status_str).unwrap_or_default();
 
+    let import_id = row
+        .get::<_, Option<String>>("import_id")?
+        .as_deref()
+        .and_then(|s| Uuid::parse_str(s).ok());
+
     Ok(Occurrence {
         id,
         numero_bo: row.get("numero_bo")?,
@@ -98,6 +115,13 @@ fn row_to_occurrence(row: &Row<'_>) -> rusqlite::Result<Occurrence> {
             .ok_or_else(|| rusqlite::Error::InvalidQuery)?,
         updated_at: parse_dt(row.get::<_, String>("updated_at")?)
             .ok_or_else(|| rusqlite::Error::InvalidQuery)?,
+        import_id,
+        original_mobile_id: row.get("original_mobile_id")?,
+        primary_accuracy_m: row.get("primary_accuracy_m")?,
+        resultado: row.get("resultado")?,
+        raw_case_json: row.get("raw_case_json")?,
+        raw_metadata_json: row.get("raw_metadata_json")?,
+        raw_location_json: row.get("raw_location_json")?,
     })
 }
 

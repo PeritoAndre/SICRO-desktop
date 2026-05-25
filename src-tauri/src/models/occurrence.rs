@@ -68,6 +68,26 @@ pub struct Occurrence {
     pub status: OccurrenceStatus,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+
+    // Spike D — fields populated when the occurrence is materialised from a
+    // .sicroapp. NULL for hand-created (Spike A) rows.
+    #[serde(default)]
+    pub import_id: Option<Uuid>,
+    #[serde(default)]
+    pub original_mobile_id: Option<String>,
+    #[serde(default)]
+    pub primary_accuracy_m: Option<f64>,
+    #[serde(default)]
+    pub resultado: Option<String>,
+    /// Verbatim payload of `caso.json` from the .sicroapp.
+    #[serde(default)]
+    pub raw_case_json: Option<String>,
+    /// Verbatim payload of `metadados.json` from the .sicroapp.
+    #[serde(default)]
+    pub raw_metadata_json: Option<String>,
+    /// Verbatim payload of `localizacao.json` from the .sicroapp.
+    #[serde(default)]
+    pub raw_location_json: Option<String>,
 }
 
 /// Input payload accepted by `create_occurrence`. All fields are optional —

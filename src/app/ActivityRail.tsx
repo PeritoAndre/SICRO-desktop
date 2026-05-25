@@ -31,7 +31,7 @@ interface RailItem {
 
 const items: RailItem[] = [
   { to: "/", label: "Início", icon: HomeIcon },
-  { to: "/dossie", label: "Dossiê", icon: FolderOpen, disabled: true },
+  { to: "/dossie", label: "Dossiê", icon: FolderOpen },
   { to: "/laudo", label: "Laudo", icon: FileText },
   { to: "/croqui", label: "Croqui", icon: Shapes, disabled: true },
   { to: "/video", label: "Vídeo", icon: Film, disabled: true },

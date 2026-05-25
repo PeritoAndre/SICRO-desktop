@@ -39,9 +39,12 @@ src-tauri/gen/
 
 # SICRO test artifacts — NEVER commit real pericial data or test exports
 *.sicrodoc
+*.sicroapp
+*.sicrocampo
 exports/
 **/test-workspaces/
 **/exportados-de-teste/
+**/imports_index.json
 
 # Design source files (keep only the rendered PNG/SVG in the repo)
 *.psd

@@ -12,10 +12,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
-import { Plus, FolderOpen, Briefcase } from "lucide-react";
+import { Plus, FolderOpen, Briefcase, FileArchive } from "lucide-react";
 import { Button } from "@components/Button/Button";
 import { EmptyState } from "@components/EmptyState/EmptyState";
 import { NewOccurrenceDialog } from "./NewOccurrenceDialog";
+import { ImportSicroappDialog } from "./ImportSicroappDialog";
 import { RecentOccurrenceCard } from "./RecentOccurrenceCard";
 import {
   selectRecents,
@@ -33,6 +34,7 @@ export function HomeView() {
   const forgetRecent = useWorkspaceStore((s) => s.forgetRecent);
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
 
   const handleOpenRecent = async (entry: RecentOccurrence) => {
@@ -62,6 +64,16 @@ export function HomeView() {
     }
   };
 
+  const handleOpenImportedWorkspace = async (workspacePath: string) => {
+    setOpenError(null);
+    try {
+      await openOccurrence(workspacePath);
+      navigate("/");
+    } catch (err) {
+      setOpenError(toSicroError(err).message);
+    }
+  };
+
   return (
     <div className={styles.wrap}>
       <div className={styles.container}>
@@ -74,6 +86,13 @@ export function HomeView() {
             </p>
           </div>
           <div className={styles.actions}>
+            <Button
+              variant="secondary"
+              leftIcon={<FileArchive size={16} />}
+              onClick={() => setImportDialogOpen(true)}
+            >
+              Importar .sicroapp…
+            </Button>
             <Button
               variant="secondary"
               leftIcon={<FolderOpen size={16} />}
@@ -148,6 +167,12 @@ export function HomeView() {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         onCreated={() => navigate("/")}
+      />
+
+      <ImportSicroappDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onOpenWorkspace={handleOpenImportedWorkspace}
       />
     </div>
   );

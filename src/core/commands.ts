@@ -15,6 +15,13 @@ import type {
 } from "@domain/occurrence";
 import type { Laudo, LaudoDocPayload, NewLaudoInput } from "@domain/laudo";
 import type { Export } from "@domain/export";
+import type {
+  Import,
+  ImportReport,
+  ImportResult,
+  ImportSicroappInput,
+  MediaAsset,
+} from "@domain/import";
 import { toSicroError, type SicroError } from "./errors";
 
 async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -142,6 +149,39 @@ export const commands = {
       workspacePath,
       laudoId,
     });
+  },
+
+  // ----- Importer (Spike D — .sicroapp) -----
+
+  /**
+   * Open a .sicroapp picked by the user, validate it, and materialise it
+   * into a fresh .sicro workspace. The full ImportReport is included in
+   * the response so the UI can display the summary immediately without a
+   * second round-trip.
+   */
+  importSicroapp(input: ImportSicroappInput): Promise<ImportResult> {
+    return safeInvoke<ImportResult>("import_sicroapp", { input });
+  },
+
+  /** Lists every import row stored in a workspace's SQLite. */
+  listWorkspaceImports(workspacePath: string): Promise<Import[]> {
+    return safeInvoke<Import[]>("list_workspace_imports", { workspacePath });
+  },
+
+  /** Reads the persisted import_report.json from disk. */
+  readImportReport(
+    workspacePath: string,
+    importId: string,
+  ): Promise<ImportReport> {
+    return safeInvoke<ImportReport>("read_import_report", {
+      workspacePath,
+      importId,
+    });
+  },
+
+  /** Lists the photos imported into a workspace (newest captured first). */
+  listWorkspacePhotos(workspacePath: string): Promise<MediaAsset[]> {
+    return safeInvoke<MediaAsset[]>("list_workspace_photos", { workspacePath });
   },
 } as const;
 
