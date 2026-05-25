@@ -14,12 +14,32 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 
+export interface StoryboardEvidenceItem {
+  src: string | null;
+  timestamp: string;
+  frame_label: string;
+  description?: string;
+  /** Evidence provenance (MVP 4). */
+  storyboard_frame_id?: string;
+  event_id?: string;
+  media_hash?: string;
+  pts?: number | null;
+  time_base?: string | null;
+  relative_path?: string | null;
+}
+
 declare module "@tiptap/core" {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface Commands<ReturnType> {
     storyboard: {
       insertStoryboard: (initialItems?: number) => ReturnType;
       appendStoryboardItem: () => ReturnType;
+      /** MVP 4: insert a fully-populated storyboard from real video frames. */
+      insertStoryboardFromVideo: (params: {
+        caption?: string;
+        media_hash?: string;
+        items: StoryboardEvidenceItem[];
+      }) => ReturnType;
     };
   }
 }
@@ -34,6 +54,8 @@ export const Storyboard = Node.create({
   addAttributes() {
     return {
       caption: { default: "Sequência observada no vídeo." },
+      // MVP 4: vínculo com o vídeo de origem.
+      media_hash: { default: null },
     };
   },
 
@@ -41,12 +63,11 @@ export const Storyboard = Node.create({
     return [{ tag: "section[data-sicro-storyboard]" }];
   },
 
-  renderHTML({ HTMLAttributes }) {
-    return [
-      "section",
-      mergeAttributes(HTMLAttributes, { "data-sicro-storyboard": "true" }),
-      0,
-    ];
+  renderHTML({ node, HTMLAttributes }) {
+    const extra: Record<string, string> = { "data-sicro-storyboard": "true" };
+    if (node.attrs.media_hash)
+      extra["data-media-hash"] = String(node.attrs.media_hash);
+    return ["section", mergeAttributes(HTMLAttributes, extra), 0];
   },
 
   addCommands() {
@@ -59,14 +80,13 @@ export const Storyboard = Node.create({
           );
           return commands.insertContent({
             type: this.name,
-            attrs: { caption: "Sequência observada no vídeo." },
+            attrs: { caption: "Sequência observada no vídeo.", media_hash: null },
             content: items,
           });
         },
       appendStoryboardItem:
         () =>
         ({ chain, state }) => {
-          // Find the closest enclosing storyboard at the selection.
           const { $from } = state.selection;
           let depth = $from.depth;
           while (depth > 0 && $from.node(depth).type.name !== "storyboard") {
@@ -78,6 +98,44 @@ export const Storyboard = Node.create({
           return chain()
             .insertContentAt(insertAt, defaultStoryboardItem(sbNode.childCount + 1))
             .run();
+        },
+      insertStoryboardFromVideo:
+        ({ caption, media_hash, items }) =>
+        ({ commands }) => {
+          if (items.length === 0) return false;
+          const tiptapItems = items.map((it) => ({
+            type: "storyboardItem",
+            attrs: {
+              src: it.src ?? null,
+              timestamp: it.timestamp,
+              frame_label: it.frame_label,
+              storyboard_frame_id: it.storyboard_frame_id ?? null,
+              event_id: it.event_id ?? null,
+              media_hash: it.media_hash ?? media_hash ?? null,
+              pts: it.pts ?? null,
+              time_base: it.time_base ?? null,
+              relative_path: it.relative_path ?? null,
+            },
+            content: [
+              {
+                type: "paragraph",
+                content: [
+                  {
+                    type: "text",
+                    text: it.description?.trim() || "Descrição do frame.",
+                  },
+                ],
+              },
+            ],
+          }));
+          return commands.insertContent({
+            type: this.name,
+            attrs: {
+              caption: caption ?? "Sequência observada no vídeo.",
+              media_hash: media_hash ?? null,
+            },
+            content: tiptapItems,
+          });
         },
     };
   },
@@ -94,6 +152,13 @@ export const StoryboardItem = Node.create({
       src: { default: null },
       timestamp: { default: "00:00:00.000" },
       frame_label: { default: "Frame: 0" },
+      // MVP 4 — evidence provenance per item.
+      storyboard_frame_id: { default: null },
+      event_id: { default: null },
+      media_hash: { default: null },
+      pts: { default: null },
+      time_base: { default: null },
+      relative_path: { default: null },
     };
   },
 
@@ -102,13 +167,22 @@ export const StoryboardItem = Node.create({
   },
 
   renderHTML({ node, HTMLAttributes }) {
+    const extra: Record<string, string> = {
+      "data-sicro-storyboard-item": "true",
+      "data-timestamp": node.attrs.timestamp ?? "",
+      "data-frame": node.attrs.frame_label ?? "",
+    };
+    if (node.attrs.storyboard_frame_id)
+      extra["data-storyboard-frame-id"] = String(node.attrs.storyboard_frame_id);
+    if (node.attrs.event_id)
+      extra["data-event-id"] = String(node.attrs.event_id);
+    if (node.attrs.media_hash)
+      extra["data-media-hash"] = String(node.attrs.media_hash);
+    if (node.attrs.relative_path)
+      extra["data-relative-path"] = String(node.attrs.relative_path);
     return [
       "article",
-      mergeAttributes(HTMLAttributes, {
-        "data-sicro-storyboard-item": "true",
-        "data-timestamp": node.attrs.timestamp ?? "",
-        "data-frame": node.attrs.frame_label ?? "",
-      }),
+      mergeAttributes(HTMLAttributes, extra),
       [
         "div",
         { "data-sicro-storyboard-image": "true" },

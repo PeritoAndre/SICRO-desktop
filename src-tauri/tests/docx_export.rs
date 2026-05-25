@@ -147,7 +147,7 @@ fn renders_paragraphs_headings_marks_table_figure_storyboard() {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("rich.docx");
-    render_doc_to_docx(&envelope, &path).expect("render_doc_to_docx ok");
+    render_doc_to_docx(&envelope, &path, None).expect("render_doc_to_docx ok");
 
     let xml = extract_document_xml(&path);
 
@@ -220,7 +220,7 @@ fn renders_empty_document_without_crashing() {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("empty.docx");
-    render_doc_to_docx(&envelope, &path).expect("render_doc_to_docx ok");
+    render_doc_to_docx(&envelope, &path, None).expect("render_doc_to_docx ok");
 
     let xml = extract_document_xml(&path);
     assert!(xml.contains("Laudo vazio"), "missing title; xml:\n{xml}");
@@ -285,7 +285,7 @@ fn renders_mvp2_quesitos_and_signature() {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("mvp2.docx");
-    render_doc_to_docx(&envelope, &path).expect("render_doc_to_docx ok");
+    render_doc_to_docx(&envelope, &path, None).expect("render_doc_to_docx ok");
 
     let xml = extract_document_xml(&path);
     assert_contains_all(
@@ -351,7 +351,7 @@ fn renders_envelope_with_missing_optional_fields() {
     });
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("minimal.docx");
-    render_doc_to_docx(&envelope, &path).expect("render_doc_to_docx ok");
+    render_doc_to_docx(&envelope, &path, None).expect("render_doc_to_docx ok");
 
     let xml = extract_document_xml(&path);
     assert!(
@@ -391,7 +391,7 @@ fn applies_page_margins_from_envelope() {
     });
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("margens.docx");
-    render_doc_to_docx(&envelope, &path).expect("render_doc_to_docx ok");
+    render_doc_to_docx(&envelope, &path, None).expect("render_doc_to_docx ok");
 
     let xml = extract_document_xml(&path);
     assert!(xml.contains("Conteudo"), "missing body text; xml:\n{xml}");
@@ -433,7 +433,7 @@ fn falls_back_to_template_margins_when_envelope_has_no_override() {
     });
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("defaults.docx");
-    render_doc_to_docx(&envelope, &path).expect("render_doc_to_docx ok");
+    render_doc_to_docx(&envelope, &path, None).expect("render_doc_to_docx ok");
 
     let xml = extract_document_xml(&path);
     assert!(xml.contains("w:top=\"1701\""), "expected template top; xml:\n{xml}");

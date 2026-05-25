@@ -20,6 +20,7 @@ import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import Placeholder from "@tiptap/extension-placeholder";
 import {
+  EvidenceTable,
   FigCaption,
   Figure,
   QuesitoAnswer,
@@ -64,6 +65,8 @@ export function laudoExtensions(opts?: { placeholder?: string }): Extensions {
     Storyboard,
     StoryboardItem,
     SystemData,
+    // MVP 4 — evidence-driven block
+    EvidenceTable,
     // MVP 2 — institutional blocks
     QuesitoList,
     QuesitoItem,

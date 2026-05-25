@@ -5,6 +5,7 @@
 
 pub mod croqui;
 pub mod dossie;
+pub mod evidence;
 pub mod export;
 pub mod import;
 pub mod laudo;
@@ -12,6 +13,9 @@ pub mod occurrence;
 pub mod video;
 
 pub use croqui::{Croqui, CroquiDoc, CroquiStatus, ExportCroquiPngInput, NewCroquiInput};
+pub use evidence::{
+    EvidenceAsset, EvidenceLink, EvidenceSourceKind, RecordEvidenceLinkInput,
+};
 pub use dossie::{
     ChecklistItem, ChecklistSummary, DossieCounts, DossieSummary, Entity, FieldNote, Measurement,
     OccurrenceStats, RehydrateOutcome, TimelineEvent, Trace,

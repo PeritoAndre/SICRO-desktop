@@ -1,6 +1,12 @@
-export { Figure, FigCaption } from "./Figure";
-export { Storyboard, StoryboardItem } from "./Storyboard";
+export { Figure, FigCaption, type FigureKind } from "./Figure";
+export { Storyboard, StoryboardItem, type StoryboardEvidenceItem } from "./Storyboard";
 export { SystemData, type SystemDataReviewStatus } from "./SystemData";
+export {
+  EvidenceTable,
+  type EvidenceTableKind,
+  type EvidenceTableColumn,
+  type EvidenceTableRow,
+} from "./EvidenceTable";
 export {
   QuesitoList,
   QuesitoItem,

@@ -4,15 +4,18 @@
  * Tabs:
  *   1. Validações — DocumentWarning list from the validator.
  *   2. Estrutura — outline of headings.
- *   3. Cabeçalho — institutional header configuration.
- *   4. Página   — page margins (MVP 2 ajuste runtime 1.2).
- *   5. Dados    — metadata of the SicroDoc envelope (id, template, timestamps).
+ *   3. Evidências — Inserir foto/croqui/frame/storyboard/dado/tabela (MVP 4).
+ *   4. Cabeçalho — institutional header configuration.
+ *   5. Página   — page margins (MVP 2 ajuste runtime 1.2).
+ *   6. Dados    — metadata of the SicroDoc envelope (id, template, timestamps).
  */
 
 import { useEffect, useMemo, useState } from "react";
 import type { JSONContent } from "@tiptap/core";
+import type { Editor } from "@tiptap/react";
 import {
   AlertTriangle,
+  Boxes,
   Info,
   LayoutTemplate,
   ListTree,
@@ -32,16 +35,35 @@ import { useLaudoStore } from "../store/laudoStore";
 import { useWorkspaceStore } from "@stores/workspaceStore";
 import { formatDateTime } from "@core/formatters";
 import { toSicroError } from "@core/errors";
+import { EvidencePanel } from "./evidence/EvidencePanel";
 import styles from "./Inspector.module.css";
 
 interface InspectorProps {
   doc: SicroDoc | null;
+  /** TipTap editor instance — necessário para a aba "Evidências" dispatchar inserts. */
+  editor?: Editor | null;
+  /** Workspace ativo — passado para os commands list*/
+  workspacePath?: string | null;
+  /** UUID do laudo aberto — usado para `evidence_links.target_id`. */
+  laudoId?: string | null;
 }
 
-type Tab = "outline" | "validation" | "header" | "page" | "meta";
+type Tab =
+  | "outline"
+  | "validation"
+  | "evidence"
+  | "header"
+  | "page"
+  | "meta";
 
-export function Inspector({ doc }: InspectorProps) {
+export function Inspector({
+  doc,
+  editor = null,
+  workspacePath = null,
+  laudoId = null,
+}: InspectorProps) {
   const [tab, setTab] = useState<Tab>("validation");
+  const activeOccurrence = useWorkspaceStore((s) => s.activeOccurrence);
 
   const warnings = useMemo<DocumentWarning[]>(
     () => (doc ? validateSicroDoc(doc) : []),
@@ -63,6 +85,12 @@ export function Inspector({ doc }: InspectorProps) {
           onClick={() => setTab("outline")}
           icon={<ListTree size={14} />}
           label="Estrutura"
+        />
+        <TabButton
+          active={tab === "evidence"}
+          onClick={() => setTab("evidence")}
+          icon={<Boxes size={14} />}
+          label="Evidências"
         />
         <TabButton
           active={tab === "header"}
@@ -89,6 +117,14 @@ export function Inspector({ doc }: InspectorProps) {
           <ValidationPanel warnings={warnings} hasDoc={!!doc} />
         )}
         {tab === "outline" && <OutlinePanel items={outline} />}
+        {tab === "evidence" && (
+          <EvidencePanel
+            editor={editor}
+            workspacePath={workspacePath}
+            laudoId={laudoId}
+            occurrence={activeOccurrence}
+          />
+        )}
         {tab === "header" && <HeaderPanel doc={doc} />}
         {tab === "page" && <PagePanel doc={doc} />}
         {tab === "meta" && <MetaPanel doc={doc} />}

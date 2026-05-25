@@ -10,6 +10,8 @@ import { commands } from "@core/commands";
 import { toSicroError, type SicroError } from "@core/errors";
 import {
   coerceSicroDoc,
+  normalizeEvidenceSrcsForSave,
+  resolveEvidenceSrcsForEditor,
   type SicroDoc,
   type SicroDocLayout,
 } from "../document-engine";
@@ -142,7 +144,14 @@ export const useLaudoStore = create<LaudoState>((set, get) => ({
     set({ isMutating: true, lastError: null });
     try {
       const payload = await commands.readLaudo(workspacePath, laudoId);
-      const doc = coerceSicroDoc(payload.doc);
+      const raw = coerceSicroDoc(payload.doc);
+      // Resolve any relative_path → convertFileSrc so figures/storyboard
+      // frames display in the editor. The on-disk doc stays untouched
+      // (see normalizeEvidenceSrcsForSave on the save path).
+      const doc: SicroDoc = {
+        ...raw,
+        content: resolveEvidenceSrcsForEditor(raw.content, workspacePath),
+      };
       set({
         currentLaudo: payload.laudo,
         currentDoc: doc,
@@ -164,20 +173,29 @@ export const useLaudoStore = create<LaudoState>((set, get) => ({
     }
     set({ isMutating: true, lastError: null });
     try {
-      const nextDoc: SicroDoc = {
+      // Strip absolute / convertFileSrc URLs back to relative paths so
+      // the `.sicrodoc` stays portable across workspaces.
+      const portableContent = normalizeEvidenceSrcsForSave(content);
+      const docToPersist: SicroDoc = {
         ...currentDoc,
-        content,
+        content: portableContent,
         updated_at: new Date().toISOString(),
       };
       const updatedRow = await commands.saveLaudo(
         workspacePath,
         current.id,
-        nextDoc,
+        docToPersist,
       );
+      // In-memory state keeps the editor-friendly (resolved) version so
+      // images keep rendering after a save.
+      const docForState: SicroDoc = {
+        ...docToPersist,
+        content: resolveEvidenceSrcsForEditor(portableContent, workspacePath),
+      };
       set((s) => ({
         list: s.list.map((l) => (l.id === updatedRow.id ? updatedRow : l)),
         currentLaudo: updatedRow,
-        currentDoc: nextDoc,
+        currentDoc: docForState,
         isMutating: false,
       }));
       return updatedRow;
