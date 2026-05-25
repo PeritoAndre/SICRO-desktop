@@ -15,6 +15,7 @@ import {
   Film,
   FolderOpen,
   Home as HomeIcon,
+  ImagePlus,
   PieChart,
   Settings,
   Shapes,
@@ -37,7 +38,7 @@ const items: RailItem[] = [
   { to: "/croqui", label: "Croqui", icon: Shapes },
   { to: "/video", label: "Vídeo", icon: Film },
   { to: "/evidencias", label: "Evidências", icon: Boxes },
-  { to: "/imagens", label: "Imagens", icon: Camera, disabled: true },
+  { to: "/imagem", label: "Imagem", icon: ImagePlus },
   { to: "/midias", label: "Mídias", icon: ClipboardList, disabled: true },
   { to: "/estatisticas", label: "Estatísticas", icon: PieChart, disabled: true },
 ];
@@ -95,5 +96,6 @@ function RailLink({ to, label, icon: Icon, disabled }: RailItem) {
   );
 }
 
-// BookOpen is re-imported to avoid tree-shaking warnings if future modules need it.
+// BookOpen / Camera are re-referenced to avoid tree-shaking warnings.
 void BookOpen;
+void Camera;

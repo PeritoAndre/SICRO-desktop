@@ -64,6 +64,18 @@ import type {
   VerifyOptions,
   WorkspaceIntegrityReport,
 } from "@domain/evidence_registry";
+import type {
+  CreateImageAnalysisInput,
+  ExportImageInput,
+  ImageAnalysis,
+  ImageAnalysisPayload,
+  ImageAssetBytes,
+  ImageExport,
+  ImageMetadata,
+  ImageOperationLog,
+  ImportLocalImageInput,
+  SaveImageAnalysisInput,
+} from "@domain/image_analysis";
 import { toSicroError, type SicroError } from "./errors";
 
 async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -574,6 +586,102 @@ export const commands = {
       "generate_workspace_integrity_report",
       { workspacePath, options: options ?? null },
     );
+  },
+
+  // ----- Editor de Imagem Pericial (MVP 7) -----
+
+  createImageAnalysisFromEvidence(
+    workspacePath: string,
+    input: CreateImageAnalysisInput,
+  ): Promise<ImageAnalysis> {
+    return safeInvoke<ImageAnalysis>(
+      "create_image_analysis_from_evidence",
+      { workspacePath, input },
+    );
+  },
+
+  createImageAnalysisFromFile(
+    workspacePath: string,
+    input: ImportLocalImageInput,
+  ): Promise<ImageAnalysis> {
+    return safeInvoke<ImageAnalysis>("create_image_analysis_from_file", {
+      workspacePath,
+      input,
+    });
+  },
+
+  listImageAnalyses(workspacePath: string): Promise<ImageAnalysis[]> {
+    return safeInvoke<ImageAnalysis[]>("list_image_analyses", {
+      workspacePath,
+    });
+  },
+
+  readImageAnalysis(
+    workspacePath: string,
+    analysisId: string,
+  ): Promise<ImageAnalysisPayload> {
+    return safeInvoke<ImageAnalysisPayload>("read_image_analysis", {
+      workspacePath,
+      analysisId,
+    });
+  },
+
+  saveImageAnalysis(
+    workspacePath: string,
+    analysisId: string,
+    input: SaveImageAnalysisInput,
+  ): Promise<ImageAnalysis> {
+    return safeInvoke<ImageAnalysis>("save_image_analysis", {
+      workspacePath,
+      analysisId,
+      input,
+    });
+  },
+
+  exportImageDerivative(
+    workspacePath: string,
+    analysisId: string,
+    input: ExportImageInput,
+  ): Promise<ImageExport> {
+    return safeInvoke<ImageExport>("export_image_derivative", {
+      workspacePath,
+      analysisId,
+      input,
+    });
+  },
+
+  readImageAsset(
+    workspacePath: string,
+    relativePath: string,
+  ): Promise<ImageAssetBytes> {
+    return safeInvoke<ImageAssetBytes>("read_image_asset", {
+      workspacePath,
+      relativePath,
+    });
+  },
+
+  getImageMetadata(
+    workspacePath: string,
+    relativePath: string,
+    computeHash?: boolean,
+  ): Promise<ImageMetadata> {
+    return safeInvoke<ImageMetadata>("get_image_metadata", {
+      workspacePath,
+      relativePath,
+      computeHash: computeHash ?? false,
+    });
+  },
+
+  listImageOperationLogs(
+    workspacePath: string,
+    analysisId: string,
+    limit?: number,
+  ): Promise<ImageOperationLog[]> {
+    return safeInvoke<ImageOperationLog[]>("list_image_operation_logs", {
+      workspacePath,
+      analysisId,
+      limit,
+    });
   },
 } as const;
 

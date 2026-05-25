@@ -53,6 +53,20 @@ sha2 = "0.10"
 #   `base64` decodes the PNG produced by the frontend (Konva.toDataURL).
 base64 = "0.22"
 
+# MVP 7 — Editor de Imagem Pericial.
+#   `image` is the canonical pure-Rust raster crate (PNG/JPEG/WebP read+write,
+#   pixel ops, conversions). It does NOT add system-library dependencies, so
+#   the Tauri bundle stays self-contained.
+#   `default-features` are disabled and only the codecs we actually need are
+#   re-enabled to keep build time down.
+image = { version = "0.25", default-features = false, features = [
+    "png",
+    "jpeg",
+    "webp",
+    "bmp",
+    "tiff",
+] }
+
 [dev-dependencies]
 tempfile = "3"
 
