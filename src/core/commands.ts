@@ -22,6 +22,17 @@ import type {
   ImportSicroappInput,
   MediaAsset,
 } from "@domain/import";
+import type {
+  ChecklistItem,
+  DossieSummary,
+  Entity,
+  FieldNote,
+  Measurement,
+  OccurrenceStats,
+  RehydrateOutcome,
+  TimelineEvent,
+  Trace,
+} from "@domain/dossie";
 import { toSicroError, type SicroError } from "./errors";
 
 async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -182,6 +193,63 @@ export const commands = {
   /** Lists the photos imported into a workspace (newest captured first). */
   listWorkspacePhotos(workspacePath: string): Promise<MediaAsset[]> {
     return safeInvoke<MediaAsset[]>("list_workspace_photos", { workspacePath });
+  },
+
+  // ----- Dossiê Operacional (MVP 3) -----
+
+  /** Aggregated summary: occurrence + latest import + counts + stats. */
+  getDossieSummary(workspacePath: string): Promise<DossieSummary> {
+    return safeInvoke<DossieSummary>("get_dossie_summary", { workspacePath });
+  },
+
+  /** Same as listWorkspacePhotos — kept for symmetry with the rest of the dossier API. */
+  listDossiePhotos(workspacePath: string): Promise<MediaAsset[]> {
+    return safeInvoke<MediaAsset[]>("list_dossie_photos", { workspacePath });
+  },
+
+  listDossieChecklist(workspacePath: string): Promise<ChecklistItem[]> {
+    return safeInvoke<ChecklistItem[]>("list_dossie_checklist", {
+      workspacePath,
+    });
+  },
+
+  listDossieEntities(workspacePath: string): Promise<Entity[]> {
+    return safeInvoke<Entity[]>("list_dossie_entities", { workspacePath });
+  },
+
+  listDossieTraces(workspacePath: string): Promise<Trace[]> {
+    return safeInvoke<Trace[]>("list_dossie_traces", { workspacePath });
+  },
+
+  listDossieMeasurements(workspacePath: string): Promise<Measurement[]> {
+    return safeInvoke<Measurement[]>("list_dossie_measurements", {
+      workspacePath,
+    });
+  },
+
+  listDossieNotes(workspacePath: string): Promise<FieldNote[]> {
+    return safeInvoke<FieldNote[]>("list_dossie_notes", { workspacePath });
+  },
+
+  listDossieTimeline(workspacePath: string): Promise<TimelineEvent[]> {
+    return safeInvoke<TimelineEvent[]>("list_dossie_timeline", {
+      workspacePath,
+    });
+  },
+
+  getDossieStats(workspacePath: string): Promise<OccurrenceStats | null> {
+    return safeInvoke<OccurrenceStats | null>("get_dossie_stats", {
+      workspacePath,
+    });
+  },
+
+  /**
+   * Re-extract every dossier table from the staged
+   * `imports/<id>/original_package.sicroapp`. Used by the "Recarregar
+   * dados do pacote" button on the Import tab.
+   */
+  rehydrateDossie(workspacePath: string): Promise<RehydrateOutcome> {
+    return safeInvoke<RehydrateOutcome>("rehydrate_dossie", { workspacePath });
   },
 } as const;
 

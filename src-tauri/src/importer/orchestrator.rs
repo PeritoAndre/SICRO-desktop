@@ -309,6 +309,31 @@ pub fn run_import(
         &mut report,
     )?;
 
+    // 13.5 MVP 3 — populate the Dossiê tables (checklist, entities, traces,
+    //      measurements, notes, timeline, stats) from the remaining JSONs.
+    //      Best-effort: an error here is reported but doesn't abort the
+    //      import (the pacote already produced a valid Occurrence + media).
+    match super::rehydrator::load_from_reader(&conn, occurrence_id, import_id, &mut reader) {
+        Ok(counts) => {
+            tracing::info!(
+                "dossiê populated: checklist={} entities={} traces={} measurements={} notes={} timeline={} stats={}",
+                counts.checklist,
+                counts.entities,
+                counts.traces,
+                counts.measurements,
+                counts.notes,
+                counts.timeline,
+                counts.stats_loaded,
+            );
+            report.warnings.extend(counts.warnings);
+        }
+        Err(e) => {
+            report.warnings.push(format!(
+                "dossiê population failed (non-fatal): {e}"
+            ));
+        }
+    }
+
     // 14. Decide final status.
     let status = if report.errors.is_empty() && report.warnings.is_empty() {
         ImportStatus::Imported

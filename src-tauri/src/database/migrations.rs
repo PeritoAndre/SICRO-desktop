@@ -35,6 +35,10 @@ const MIGRATIONS: &[Migration] = &[
         version: "004_imports",
         sql: include_str!("../../migrations/004_imports.sql"),
     },
+    Migration {
+        version: "005_dossie",
+        sql: include_str!("../../migrations/005_dossie.sql"),
+    },
 ];
 
 pub fn run_migrations(conn: &mut Connection) -> Result<()> {
