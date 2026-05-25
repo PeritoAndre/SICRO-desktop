@@ -1,0 +1,63 @@
+.wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  min-height: 0;
+}
+
+.empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sicro-fg-muted);
+  font-size: var(--text-sm);
+}
+
+.canvasArea {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: #1a2030;
+}
+
+/* Konva Stage renders a div container with absolute-positioned canvases.
+ * To keep the status bar pinned at the bottom we let the Stage div fill the
+ * remaining height via flex. */
+.canvasArea > div:first-child {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+.statusBar {
+  background: var(--sicro-surface-2);
+  border-top: 1px solid var(--sicro-divider);
+  padding: 4px var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--sicro-fg-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+}
+.statusBar code {
+  background: var(--sicro-surface-1);
+  padding: 0 4px;
+  border-radius: 2px;
+  color: var(--sicro-fg);
+}
+.statusTitle {
+  color: var(--sicro-fg);
+  font-family: var(--font-ui);
+  font-weight: 600;
+}
+.statusFeedback {
+  margin-left: auto;
+  color: var(--sicro-accent);
+  font-family: var(--font-ui);
+}

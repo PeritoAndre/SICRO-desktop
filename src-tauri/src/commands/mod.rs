@@ -7,6 +7,7 @@
 //! registration. Always reference commands via their full module path:
 //! `commands::<module>::<name>`.
 
+pub mod croqui_commands;
 pub mod dossie_commands;
 pub mod export_commands;
 pub mod import_commands;
