@@ -22,11 +22,16 @@ use crate::database::migrations::run_migrations;
 use crate::database::repositories::{croqui_repo, occurrence_repo};
 use crate::error::{Result, SicroError};
 use crate::filesystem::atomic_write_bytes;
+use crate::hashing::sha256::{sha256_bytes, sha256_file};
+use crate::image_processing::lens_correction::{
+    apply_radial_correction, coefficients_for_intensity, crop as crop_image, CropRect,
+};
 use crate::models::{Croqui, CroquiDoc, CroquiStatus, ExportCroquiPngInput, NewCroquiInput};
 use crate::workspace::manifest::{Manifest, SQLITE_FILENAME};
 
 const CROQUIS_SUBDIR: &str = "croquis";
 const CROQUIS_EXPORT_SUBDIR: &str = "croquis/exports";
+const CROQUIS_BACKGROUNDS_SUBDIR: &str = "croquis/backgrounds";
 const CURRENT_SCHEMA_VERSION: &str = "0.1";
 
 #[tauri::command]
@@ -223,6 +228,206 @@ pub async fn export_croqui_png(
     )?;
 
     Ok(relative_path)
+}
+
+// ---------------------------------------------------------------------------
+// Drone import (MVP 9 Round 4 — Quarta rodada)
+//
+// Reads an aerial photo (local absolute path), applies radial lens
+// correction at the given intensity, crops to the rectangle the perito
+// drew in the wizard, writes the derivative to
+// `croquis/backgrounds/drone_corrigido_<ts>.png`, generates a sidecar
+// JSON with hashes + parameters, and returns both relative paths so the
+// frontend can drop the derivative as the croqui background.
+//
+// The original file is NEVER mutated.
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CropRectInput {
+    pub x: u32,
+    pub y: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DroneImportInput {
+    /// Absolute path to the source image on disk (drone export, dossier
+    /// photo, etc.). When the file already sits inside the workspace,
+    /// the sidecar will record a workspace-relative path.
+    pub source_absolute_path: String,
+    /// 0.0..=1.0 — slider position from the UI; 0 disables correction.
+    pub intensity: f32,
+    /// Crop applied to the *output* of the lens correction (same
+    /// dimensions as the input image).
+    pub crop: CropRectInput,
+    /// Optional — when known, recorded in the sidecar for audit.
+    pub croqui_id: Option<String>,
+    /// Optional — same, for audit traceability.
+    pub occurrence_id: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DroneImportResult {
+    /// Workspace-relative path of the corrected + cropped PNG, ready
+    /// to feed into `SicroCroquiBackgroundImage.source_path`.
+    pub output_relative_path: String,
+    /// Workspace-relative path of the JSON sidecar describing the
+    /// processing pipeline (so the result is reproducible / auditable).
+    pub sidecar_relative_path: String,
+    pub output_width: u32,
+    pub output_height: u32,
+    /// SHA-256 of the final PNG bytes.
+    pub output_hash_sha256: String,
+}
+
+#[tauri::command]
+pub async fn import_drone_image(
+    workspace_path: String,
+    input: DroneImportInput,
+) -> Result<DroneImportResult> {
+    let ws = PathBuf::from(&workspace_path);
+    let source = PathBuf::from(&input.source_absolute_path);
+    if !source.exists() {
+        return Err(SicroError::Validation(format!(
+            "drone source file does not exist: {}",
+            source.display()
+        )));
+    }
+
+    // Hash the original BEFORE doing anything — the sidecar records it
+    // so the chain of custody is auditable end-to-end.
+    let original_hash = sha256_file(&source)?;
+
+    // Load + correct + crop, all in memory. The image crate dispatches
+    // by file extension; PNG / JPEG / WebP all work.
+    let dyn_img = image::open(&source).map_err(|e| {
+        SicroError::Filesystem(format!(
+            "failed to decode drone image {}: {}",
+            source.display(),
+            e
+        ))
+    })?;
+    let coeffs = coefficients_for_intensity(input.intensity);
+    let corrected = apply_radial_correction(&dyn_img, coeffs);
+
+    let crop_rect = CropRect {
+        x: input.crop.x,
+        y: input.crop.y,
+        width: input.crop.width,
+        height: input.crop.height,
+    };
+    let final_img = crop_image(corrected, crop_rect).ok_or_else(|| {
+        SicroError::Validation(
+            "crop rectangle produced an empty image — adjust the crop and try again"
+                .to_string(),
+        )
+    })?;
+    let (out_w, out_h) = final_img.dimensions();
+
+    // Encode the result as PNG into a byte buffer so we can both write
+    // it to disk and hash it without re-reading.
+    let mut png_bytes: Vec<u8> = Vec::new();
+    {
+        let mut cursor = std::io::Cursor::new(&mut png_bytes);
+        final_img
+            .write_to(&mut cursor, image::ImageFormat::Png)
+            .map_err(|e| {
+                SicroError::Filesystem(format!("failed to encode PNG: {e}"))
+            })?;
+    }
+
+    // Stamp filenames with the same timestamp so the PNG and sidecar
+    // share a stable prefix the user can grep for.
+    let ts = Utc::now().format("%Y%m%d_%H%M%S").to_string();
+    let png_filename = format!("drone_corrigido_{ts}.png");
+    let sidecar_filename = format!("drone_corrigido_{ts}.sidecar.json");
+
+    let backgrounds_dir = ws.join(CROQUIS_BACKGROUNDS_SUBDIR);
+    std::fs::create_dir_all(&backgrounds_dir).map_err(|e| {
+        SicroError::Filesystem(format!(
+            "cannot create backgrounds dir {}: {}",
+            backgrounds_dir.display(),
+            e
+        ))
+    })?;
+    let png_path = backgrounds_dir.join(&png_filename);
+    atomic_write_bytes(&png_path, &png_bytes)?;
+
+    let output_hash = sha256_bytes(&png_bytes);
+
+    // Sidecar — captures every parameter so the operation is
+    // reproducible / auditable. `original_relative_path` is best-effort:
+    // when the source already sits inside the workspace, we record the
+    // relative form; otherwise we store the absolute path verbatim.
+    let original_relative = source
+        .strip_prefix(&ws)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"));
+    let sidecar = serde_json::json!({
+        "software": "SICRO Desktop — Croqui Drone Import",
+        "schema_version": "1",
+        "created_at": Utc::now().to_rfc3339(),
+        "original_absolute_path": source.to_string_lossy(),
+        "original_relative_path": original_relative,
+        "original_hash_sha256": original_hash,
+        "output_relative_path": format!(
+            "{CROQUIS_BACKGROUNDS_SUBDIR}/{png_filename}"
+        ),
+        "output_hash_sha256": output_hash,
+        "output_width": out_w,
+        "output_height": out_h,
+        "lens_correction": {
+            "enabled": !coeffs.is_identity(),
+            "intensity": input.intensity,
+            "k1": coeffs.k1,
+            "k2": coeffs.k2,
+            "k3": coeffs.k3,
+        },
+        "crop": {
+            "x": input.crop.x,
+            "y": input.crop.y,
+            "width": input.crop.width,
+            "height": input.crop.height,
+        },
+        "croqui_id": input.croqui_id,
+        "occurrence_id": input.occurrence_id,
+    });
+    let sidecar_path = backgrounds_dir.join(&sidecar_filename);
+    let sidecar_bytes = serde_json::to_vec_pretty(&sidecar)?;
+    atomic_write_bytes(&sidecar_path, &sidecar_bytes)?;
+
+    // Audit log so the perito can later trace the import via the
+    // existing occurrence_audit view.
+    if let Some(occ_id) = &input.occurrence_id {
+        if let Ok(occ_uuid) = Uuid::parse_str(occ_id) {
+            let conn = open_connection(&ws.join(SQLITE_FILENAME))?;
+            occurrence_repo::record_audit(
+                &conn,
+                Some(&occ_uuid),
+                "croqui.background.drone_imported",
+                Some("croqui"),
+                Some("background"),
+                None,
+                Some(&png_filename),
+            )?;
+        }
+    }
+
+    Ok(DroneImportResult {
+        output_relative_path: format!(
+            "{CROQUIS_BACKGROUNDS_SUBDIR}/{png_filename}"
+        ),
+        sidecar_relative_path: format!(
+            "{CROQUIS_BACKGROUNDS_SUBDIR}/{sidecar_filename}"
+        ),
+        output_width: out_w,
+        output_height: out_h,
+        output_hash_sha256: output_hash,
+    })
 }
 
 // ---------------------------------------------------------------------------

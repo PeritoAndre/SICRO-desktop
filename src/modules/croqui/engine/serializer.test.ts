@@ -179,4 +179,67 @@ describe("serializeCroquiDoc", () => {
     expect(reparsed.scale?.px_per_m).toBe(30);
     expect(reparsed.croqui_id).toBe(VALID_MINIMUM.croqui_id);
   });
+
+  // MVP 9 Round 5 — additive background fields.
+  it("defaults background.rotation to 0 when the field is missing (legacy doc)", () => {
+    const d = coerceCroquiDoc({
+      ...VALID_MINIMUM,
+      background_image: {
+        source_path: "croquis/backgrounds/foo.png",
+        x: 10,
+        y: 20,
+        width: 800,
+        height: 600,
+        opacity: 0.6,
+        locked: true,
+      },
+    });
+    expect(d.background_image).not.toBeNull();
+    expect(d.background_image!.rotation).toBe(0);
+    expect(d.background_image!.x).toBe(10);
+    expect(d.background_image!.opacity).toBe(0.6);
+  });
+
+  it("preserves rotation / sidecar_path / original_path round-trip", () => {
+    const d = coerceCroquiDoc({
+      ...VALID_MINIMUM,
+      background_image: {
+        source_path: "croquis/backgrounds/drone_corrigido_x.png",
+        x: 100,
+        y: 50,
+        width: 1200,
+        height: 800,
+        opacity: 0.8,
+        locked: false,
+        rotation: 45,
+        sidecar_path: "croquis/backgrounds/drone_corrigido_x.sidecar.json",
+        original_path: "C:/Users/perit/drone_001.JPG",
+      },
+    });
+    const text = JSON.stringify(serializeCroquiDoc(d));
+    const reparsed = coerceCroquiDoc(JSON.parse(text));
+    expect(reparsed.background_image?.rotation).toBe(45);
+    expect(reparsed.background_image?.sidecar_path).toBe(
+      "croquis/backgrounds/drone_corrigido_x.sidecar.json",
+    );
+    expect(reparsed.background_image?.original_path).toBe(
+      "C:/Users/perit/drone_001.JPG",
+    );
+    expect(reparsed.background_image?.locked).toBe(false);
+  });
+
+  it("drops invalid background_image (no source_path) without crashing", () => {
+    const d = coerceCroquiDoc({
+      ...VALID_MINIMUM,
+      background_image: {
+        // no source_path
+        x: 10,
+        y: 10,
+        width: 100,
+        height: 100,
+        opacity: 1,
+      },
+    });
+    expect(d.background_image).toBeNull();
+  });
 });

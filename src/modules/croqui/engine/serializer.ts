@@ -17,11 +17,33 @@ import {
   type ObjectCategory,
   type SicroCroquiCanvas,
   type SicroCroquiDoc,
+  type SicroCroquiExportSettings,
   type SicroCroquiLayer,
   type SicroCroquiScale,
   type SicroCroquiBackgroundImage,
+  type SicroCroquiStampMetadata,
+  type SicroCroquiViewSettings,
   type SicroObject,
 } from "./schema";
+
+// ---------------------------------------------------------------------------
+// MVP 9 — defaults for the new optional sections
+
+const DEFAULT_VIEW_SETTINGS: SicroCroquiViewSettings = {
+  show_grid: true,
+  grid_size: 50,
+  snap_to_grid: false,
+  show_rulers: true,
+  show_labels: true,
+  show_measurements: true,
+};
+
+const DEFAULT_EXPORT_SETTINGS: SicroCroquiExportSettings = {
+  with_stamp: true,
+  with_background: true,
+  with_legend: false,
+  default_kind: "tecnico",
+};
 
 const DEFAULT_CANVAS: SicroCroquiCanvas = {
   width_px: 1600,
@@ -84,6 +106,56 @@ export function coerceCroquiDoc(raw: unknown): SicroCroquiDoc {
     background_image: coerceBackgroundImage(o.background_image),
     layers,
     objects,
+    // MVP 9 — opcionais aditivos
+    view_settings: coerceViewSettings(o.view_settings),
+    export_settings: coerceExportSettings(o.export_settings),
+    stamp_metadata: coerceStampMetadata(o.stamp_metadata),
+  };
+}
+
+function coerceViewSettings(raw: unknown): SicroCroquiViewSettings {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_VIEW_SETTINGS };
+  const o = raw as Record<string, unknown>;
+  return {
+    show_grid: o.show_grid !== false,
+    grid_size: numberField(o, "grid_size") ?? DEFAULT_VIEW_SETTINGS.grid_size,
+    snap_to_grid: o.snap_to_grid === true,
+    show_rulers: o.show_rulers !== false,
+    show_labels: o.show_labels !== false,
+    show_measurements: o.show_measurements !== false,
+  };
+}
+
+function coerceExportSettings(raw: unknown): SicroCroquiExportSettings {
+  if (!raw || typeof raw !== "object") return { ...DEFAULT_EXPORT_SETTINGS };
+  const o = raw as Record<string, unknown>;
+  return {
+    with_stamp: o.with_stamp !== false,
+    with_background: o.with_background !== false,
+    with_legend: o.with_legend === true,
+    default_kind:
+      stringField(o, "default_kind") ?? DEFAULT_EXPORT_SETTINGS.default_kind,
+  };
+}
+
+function coerceStampMetadata(raw: unknown): SicroCroquiStampMetadata {
+  const base: SicroCroquiStampMetadata = {
+    bo: null,
+    protocolo: null,
+    tipo_pericia: null,
+    municipio: null,
+    perito: null,
+    custom_note: null,
+  };
+  if (!raw || typeof raw !== "object") return base;
+  const o = raw as Record<string, unknown>;
+  return {
+    bo: stringField(o, "bo"),
+    protocolo: stringField(o, "protocolo"),
+    tipo_pericia: stringField(o, "tipo_pericia"),
+    municipio: stringField(o, "municipio"),
+    perito: stringField(o, "perito"),
+    custom_note: stringField(o, "custom_note"),
   };
 }
 
@@ -126,6 +198,11 @@ function coerceBackgroundImage(
   const o = raw as Record<string, unknown>;
   const source_path = stringField(o, "source_path");
   if (!source_path) return null;
+  // MVP 9 Round 5 — `rotation`, `sidecar_path`, `original_path` are all
+  // optional and default to safe values, so docs from earlier rounds
+  // keep loading without intervention.
+  const sidecar = stringField(o, "sidecar_path");
+  const original = stringField(o, "original_path");
   return {
     source_path,
     x: numberField(o, "x") ?? 0,
@@ -134,6 +211,9 @@ function coerceBackgroundImage(
     height: numberField(o, "height") ?? 0,
     opacity: numberField(o, "opacity") ?? 1,
     locked: o.locked !== false,
+    rotation: numberField(o, "rotation") ?? 0,
+    ...(sidecar ? { sidecar_path: sidecar } : {}),
+    ...(original ? { original_path: original } : {}),
   };
 }
 
@@ -146,6 +226,8 @@ export function inferCategory(obj: SicroObject): ObjectCategory {
       return "medidas";
     case "text":
       return "anotacoes";
+    case "road":
+      return "vias";
     case "line":
       if (obj.subtype === "r1" || obj.subtype === "r2") return "referenciais";
       if (
@@ -153,12 +235,31 @@ export function inferCategory(obj: SicroObject): ObjectCategory {
         obj.subtype === "lane" ||
         obj.subtype === "lane_separator" ||
         obj.subtype === "sidewalk" ||
-        obj.subtype === "arrow"
+        obj.subtype === "arrow" ||
+        obj.subtype === "canteiro" ||
+        obj.subtype === "acostamento" ||
+        obj.subtype === "trajetoria"
       ) {
         return "vias";
       }
+      if (obj.subtype === "callout") {
+        return "anotacoes";
+      }
       return "outros";
     case "marker":
+      // Mobiliário urbano (placas/postes/árvores/semáforos/faixa).
+      if (
+        obj.subtype === "semaforo" ||
+        obj.subtype === "placa_pare" ||
+        obj.subtype === "placa_preferencia" ||
+        obj.subtype === "poste" ||
+        obj.subtype === "arvore" ||
+        obj.subtype === "guia" ||
+        obj.subtype === "faixa_pedestre"
+      ) {
+        return "mobiliario_urbano";
+      }
+      // Vestígios periciais.
       if (
         obj.subtype === "collision_x" ||
         obj.subtype === "brake_mark" ||
@@ -166,16 +267,22 @@ export function inferCategory(obj: SicroObject): ObjectCategory {
         obj.subtype === "fluid" ||
         obj.subtype === "blood" ||
         obj.subtype === "debris" ||
-        obj.subtype === "trace_point"
+        obj.subtype === "trace_point" ||
+        obj.subtype === "skid_curve" ||
+        obj.subtype === "sulcagem" ||
+        obj.subtype === "ranhura" ||
+        obj.subtype === "impact_area" ||
+        obj.subtype === "rest_position"
       ) {
         return "vestigios";
       }
+      // Pessoas — pericial contexto.
       if (
         obj.subtype === "pedestrian" ||
         obj.subtype === "body" ||
         obj.subtype === "victim_point"
       ) {
-        return "vestigios"; // pessoas no contexto pericial entram em vestígios
+        return "vestigios";
       }
       return "outros";
     default:

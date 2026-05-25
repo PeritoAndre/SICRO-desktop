@@ -63,6 +63,7 @@ const CATEGORY_ORDER: ObjectCategory[] = [
   "veiculos",
   "referenciais",
   "vestigios",
+  "mobiliario_urbano",
   "medidas",
   "anotacoes",
   "outros",
@@ -73,6 +74,7 @@ const CATEGORY_LABEL: Record<ObjectCategory, string> = {
   veiculos: "Veículos",
   referenciais: "Referenciais (R1/R2)",
   vestigios: "Vestígios e pessoas",
+  mobiliario_urbano: "Mobiliário urbano",
   medidas: "Medidas",
   anotacoes: "Anotações",
   outros: "Outros",
@@ -382,6 +384,8 @@ function shortKind(o: SicroObject): string {
       return "T";
     case "measurement":
       return "↔";
+    case "road":
+      return "R";
   }
 }
 
@@ -398,6 +402,8 @@ function summariseObject(o: SicroObject): string {
       return o.text.slice(0, 32);
     case "measurement":
       return "Medição";
+    case "road":
+      return `Via ${o.subtype} (${o.lane_count} faixa(s))`;
   }
 }
 

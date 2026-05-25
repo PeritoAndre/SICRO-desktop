@@ -11,6 +11,7 @@ pub mod exporters;
 pub mod filesystem;
 pub mod hashing;
 pub mod image_editor;
+pub mod image_processing;
 pub mod importer;
 pub mod models;
 pub mod registry;
@@ -77,6 +78,7 @@ pub fn run() {
             commands::croqui_commands::read_croqui,
             commands::croqui_commands::save_croqui,
             commands::croqui_commands::export_croqui_png,
+            commands::croqui_commands::import_drone_image,
             // video (Spike F)
             commands::video_commands::register_video_media,
             commands::video_commands::list_video_media,

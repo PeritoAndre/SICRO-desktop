@@ -29,6 +29,14 @@ export type Tool =
   | "vehicle_moto"
   | "vehicle_truck"
   | "vehicle_bike"
+  // MVP 9 — frota expandida
+  | "vehicle_pickup"
+  | "vehicle_van"
+  | "vehicle_onibus"
+  | "vehicle_moto_esportiva"
+  | "vehicle_moto_carga"
+  | "vehicle_caminhao_pesado"
+  | "vehicle_carreta"
   // Lines
   | "line_road"
   | "line_lane"
@@ -37,6 +45,11 @@ export type Tool =
   | "line_arrow"
   | "line_r1"
   | "line_r2"
+  // MVP 9 — linhas adicionais
+  | "line_canteiro"
+  | "line_acostamento"
+  | "line_trajetoria"
+  | "line_callout"
   // Markers (collision + vestígios + pessoas)
   | "marker_x"
   | "marker_brake"
@@ -46,15 +59,44 @@ export type Tool =
   | "marker_debris"
   | "marker_pedestrian"
   | "marker_body"
+  // MVP 9 — vestígios + mobiliário urbano
+  | "marker_skid_curve"
+  | "marker_sulcagem"
+  | "marker_ranhura"
+  | "marker_impact_area"
+  | "marker_rest_position"
+  | "marker_semaforo"
+  | "marker_placa_pare"
+  | "marker_placa_preferencia"
+  | "marker_poste"
+  | "marker_arvore"
+  | "marker_guia"
+  | "marker_faixa_pedestre"
   // Annotation / measurement / scale
   | "text"
   | "measurement"
-  | "set_scale";
+  | "set_scale"
+  // MVP 9 Road Engine Pro — multi-click road creation, one tool per style.
+  | "road_urban"
+  | "road_avenue"
+  | "road_highway"
+  | "road_dirt"
+  | "road_parking";
 
 /** Stage of a two-click tool (measurement / set_scale / line). */
 export interface PendingTwoClick {
   tool: Tool;
   first: SicroPoint;
+}
+
+/**
+ * Multi-click road drafting state (MVP 9 Road Engine Pro). The user
+ * clicks any number of control points; pressing Enter / double-click
+ * finalises the road, Esc cancels.
+ */
+export interface RoadDraft {
+  tool: Tool;
+  points: SicroPoint[];
 }
 
 export interface Viewport {
@@ -71,6 +113,7 @@ export function useEditorState() {
   const [tool, setTool] = useState<Tool>("select");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingTwoClick | null>(null);
+  const [roadDraft, setRoadDraft] = useState<RoadDraft | null>(null);
   const [viewport, setViewport] = useState<Viewport>(DEFAULT_VIEWPORT);
   const [pointerWorld, setPointerWorld] = useState<SicroPoint>({ x: 0, y: 0 });
   /** Undo stack: snapshots of `objects` arrays before each mutation. */
@@ -123,6 +166,8 @@ export function useEditorState() {
     setSelectedId,
     pending,
     setPending,
+    roadDraft,
+    setRoadDraft,
     viewport,
     setViewport,
     pointerWorld,

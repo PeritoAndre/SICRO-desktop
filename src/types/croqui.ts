@@ -34,3 +34,35 @@ export interface ExportCroquiPngInput {
   /** Base64-encoded PNG bytes (Konva's toDataURL() output works after stripping the data: prefix). */
   png_base64: string;
 }
+
+// MVP 9 Round 4 — Drone import flow ------------------------------------------
+
+export interface CropRectInput {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface DroneImportInput {
+  /** Absolute path of the source image (drone export / dossier photo). */
+  source_absolute_path: string;
+  /** Slider value 0..=1; 0 disables lens correction. */
+  intensity: number;
+  /** Crop rectangle applied AFTER lens correction. */
+  crop: CropRectInput;
+  /** Optional traceability fields recorded in the sidecar. */
+  croqui_id?: string;
+  occurrence_id?: string;
+}
+
+export interface DroneImportResult {
+  /** Workspace-relative path of the corrected + cropped PNG. */
+  output_relative_path: string;
+  /** Workspace-relative path of the JSON sidecar. */
+  sidecar_relative_path: string;
+  output_width: number;
+  output_height: number;
+  /** SHA-256 of the saved PNG bytes (lowercase hex). */
+  output_hash_sha256: string;
+}

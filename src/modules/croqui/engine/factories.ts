@@ -9,10 +9,16 @@
 import type {
   LineSubtype,
   MarkerSubtype,
+  RoadCurb,
+  RoadDirection,
+  RoadMarkings,
+  RoadStyle,
+  RoadSurface,
   SicroLineObject,
   SicroMarkerObject,
   SicroMeasurementObject,
   SicroPoint,
+  SicroRoadObject,
   SicroTextObject,
   SicroVehicleObject,
   VehicleBodyType,
@@ -41,6 +47,14 @@ const VEHICLE_DIMENSIONS: Record<
   moto: { width: 36, height: 16, color: "#facc15" },
   bike: { width: 28, height: 12, color: "#22c55e" },
   other: { width: 80, height: 40, color: "#6b7280" },
+  // MVP 9 — frota expandida
+  pickup: { width: 96, height: 42, color: "#0f766e" }, // caminhonete
+  van: { width: 96, height: 46, color: "#854d0e" },
+  onibus: { width: 220, height: 60, color: "#b45309" },
+  moto_esportiva: { width: 38, height: 14, color: "#dc2626" },
+  moto_carga: { width: 50, height: 28, color: "#a16207" }, // moto com bagageiro
+  caminhao_pesado: { width: 160, height: 60, color: "#7c2d12" },
+  carreta: { width: 280, height: 60, color: "#451a03" }, // cavalo + semi-reboque
 };
 
 function uid(prefix: string): string {
@@ -80,7 +94,7 @@ export function makeVehicle(
   };
 }
 
-/** MVP 6 — central palette for line subtypes (color + width + dashing). */
+/** Central palette for line subtypes (color + width + dashing). MVP 6+9. */
 export const LINE_STYLES: Record<
   LineSubtype,
   { color: string; width: number; dashed: boolean }
@@ -93,6 +107,11 @@ export const LINE_STYLES: Record<
   sidewalk: { color: "#52525b", width: 3, dashed: false },
   arrow: { color: "#111827", width: 3, dashed: false },
   freehand: { color: "#111827", width: 2, dashed: false },
+  // MVP 9
+  canteiro: { color: "#22c55e", width: 8, dashed: false }, // verde grosso
+  acostamento: { color: "#a8a29e", width: 4, dashed: false },
+  trajetoria: { color: "#2563eb", width: 3, dashed: true },
+  callout: { color: "#0ea5e9", width: 1.5, dashed: true },
 };
 
 export function makeLine(
@@ -117,7 +136,7 @@ export function makeLine(
     category:
       subtype === "r1" || subtype === "r2"
         ? "referenciais"
-        : subtype === "freehand"
+        : subtype === "freehand" || subtype === "callout"
           ? "anotacoes"
           : "vias",
   };
@@ -140,7 +159,7 @@ export function makeArrow(p1: SicroPoint, p2: SicroPoint): SicroLineObject {
   return makeLine(p1, p2, "arrow");
 }
 
-/** MVP 6 — marker palette and default labels. */
+/** Marker palette and default labels. MVP 6 + MVP 9. */
 export const MARKER_STYLES: Record<
   MarkerSubtype,
   { color: string; defaultLabel: string; defaultSize: number }
@@ -155,6 +174,20 @@ export const MARKER_STYLES: Record<
   debris: { color: "#a16207", defaultLabel: "Destroços", defaultSize: 30 },
   pedestrian: { color: "#0f172a", defaultLabel: "Pedestre", defaultSize: 22 },
   body: { color: "#0f172a", defaultLabel: "Vítima", defaultSize: 32 },
+  // MVP 9 — vestígios adicionais
+  skid_curve: { color: "#1f2937", defaultLabel: "Derrapagem", defaultSize: 70 },
+  sulcagem: { color: "#451a03", defaultLabel: "Sulcagem", defaultSize: 60 },
+  ranhura: { color: "#78350f", defaultLabel: "Ranhura", defaultSize: 50 },
+  impact_area: { color: "#b91c1c", defaultLabel: "Área de impacto", defaultSize: 80 },
+  rest_position: { color: "#0e7490", defaultLabel: "Repouso final", defaultSize: 28 },
+  // MVP 9 — mobiliário urbano
+  semaforo: { color: "#f97316", defaultLabel: "Semáforo", defaultSize: 22 },
+  placa_pare: { color: "#dc2626", defaultLabel: "PARE", defaultSize: 26 },
+  placa_preferencia: { color: "#f59e0b", defaultLabel: "Preferência", defaultSize: 26 },
+  poste: { color: "#52525b", defaultLabel: "Poste", defaultSize: 14 },
+  arvore: { color: "#15803d", defaultLabel: "Árvore", defaultSize: 26 },
+  guia: { color: "#a8a29e", defaultLabel: "Guia", defaultSize: 18 },
+  faixa_pedestre: { color: "#1e293b", defaultLabel: "Faixa pedestre", defaultSize: 40 },
 };
 
 export function makeMarker(
@@ -163,6 +196,15 @@ export function makeMarker(
   labelOverride?: string,
 ): SicroMarkerObject {
   const style = MARKER_STYLES[subtype];
+  // Mobiliário urbano vai para a categoria dedicada (MVP 9).
+  const isMobiliario =
+    subtype === "semaforo" ||
+    subtype === "placa_pare" ||
+    subtype === "placa_preferencia" ||
+    subtype === "poste" ||
+    subtype === "arvore" ||
+    subtype === "guia" ||
+    subtype === "faixa_pedestre";
   return {
     id: uid("marker"),
     layer_id: OBJECT_LAYER,
@@ -175,7 +217,7 @@ export function makeMarker(
     label: labelOverride ?? style.defaultLabel,
     visible: true,
     locked: false,
-    category: "vestigios",
+    category: isMobiliario ? "mobiliario_urbano" : "vestigios",
   };
 }
 
@@ -192,6 +234,142 @@ export function makeText(p: SicroPoint, text = "Anotação"): SicroTextObject {
     visible: true,
     locked: false,
     category: "anotacoes",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// MVP 9 Road Engine Pro — `SicroRoadObject` factory + style presets.
+//
+// Each preset bundles the parameters the renderer needs to draw a
+// road end-to-end: paved width, lane count, default markings, curb,
+// surface fill and a sensible spline tension. The user can tweak any
+// of these from the InspectorPanel.
+//
+// Width values are in canvas pixels at zoom 1. They follow the same
+// 18 px/m convention used by VEHICLE_DIMENSIONS, so a 4-lane avenue
+// (~14m of paved area) reads as ~140 px.
+
+export const ROAD_STYLES: Record<
+  RoadStyle,
+  {
+    width: number;
+    lane_count: number;
+    direction: RoadDirection;
+    markings: RoadMarkings;
+    curb: RoadCurb;
+    surface: RoadSurface;
+    spline_tension: number;
+  }
+> = {
+  urban: {
+    width: 80,
+    lane_count: 2,
+    direction: "two_way",
+    markings: {
+      center_line: "dashed",
+      edge_line: true,
+      lane_dividers: false,
+    },
+    curb: { enabled: true, width: 2, color: "#475569" },
+    surface: { fill: "#3f3f46", texture: "none" },
+    spline_tension: 0.5,
+  },
+  avenue: {
+    width: 140,
+    lane_count: 4,
+    direction: "two_way",
+    markings: {
+      center_line: "double_solid",
+      edge_line: true,
+      lane_dividers: true,
+    },
+    curb: { enabled: true, width: 3, color: "#475569" },
+    surface: { fill: "#3f3f46", texture: "none" },
+    spline_tension: 0.5,
+  },
+  highway: {
+    width: 180,
+    lane_count: 4,
+    direction: "two_way",
+    markings: {
+      center_line: "solid",
+      edge_line: true,
+      lane_dividers: true,
+    },
+    curb: { enabled: false, width: 0, color: "#475569" },
+    surface: { fill: "#27272a", texture: "none" },
+    spline_tension: 0.6,
+  },
+  dirt: {
+    width: 60,
+    lane_count: 1,
+    direction: "two_way",
+    markings: {
+      center_line: "none",
+      edge_line: false,
+      lane_dividers: false,
+    },
+    curb: { enabled: false, width: 0, color: "#a8a29e" },
+    surface: { fill: "#a8a29e", texture: "none" },
+    spline_tension: 0.5,
+  },
+  parking: {
+    width: 120,
+    lane_count: 1,
+    direction: "unknown",
+    markings: {
+      center_line: "none",
+      edge_line: true,
+      lane_dividers: false,
+    },
+    curb: { enabled: true, width: 2, color: "#52525b" },
+    surface: { fill: "#52525b", texture: "none" },
+    spline_tension: 0,
+  },
+  custom: {
+    width: 80,
+    lane_count: 2,
+    direction: "two_way",
+    markings: {
+      center_line: "dashed",
+      edge_line: true,
+      lane_dividers: false,
+    },
+    curb: { enabled: false, width: 0, color: "#475569" },
+    surface: { fill: "#3f3f46", texture: "none" },
+    spline_tension: 0.5,
+  },
+};
+
+/**
+ * Create a SicroRoadObject from a centerline and (optionally) a style
+ * preset. The caller can override any field — for example to bump the
+ * lane count or to mark this segment as `subtype: "intersection"`.
+ */
+export function makeRoad(
+  points: number[],
+  road_style: RoadStyle = "urban",
+  overrides: Partial<SicroRoadObject> = {},
+): SicroRoadObject {
+  const preset = ROAD_STYLES[road_style];
+  return {
+    id: uid("road"),
+    layer_id: OBJECT_LAYER,
+    kind: "road",
+    subtype: "spline",
+    points,
+    width: preset.width,
+    lane_count: preset.lane_count,
+    direction: preset.direction,
+    road_style,
+    markings: { ...preset.markings },
+    curb: { ...preset.curb },
+    surface: { ...preset.surface },
+    spline_tension: preset.spline_tension,
+    visible: true,
+    locked: false,
+    category: "vias",
+    ...overrides,
   };
 }
 
@@ -217,7 +395,8 @@ export function cloneObject<T extends SicroVehicleObject
   | SicroLineObject
   | SicroMarkerObject
   | SicroTextObject
-  | SicroMeasurementObject>(source: T): T {
+  | SicroMeasurementObject
+  | SicroRoadObject>(source: T): T {
   const cloned = { ...source } as T;
   cloned.id = uid(source.kind);
   // Nudge so the duplicate doesn't overlap the source visually.
@@ -230,6 +409,11 @@ export function cloneObject<T extends SicroVehicleObject
   if (cloned.kind === "line") {
     cloned.points = source.kind === "line"
       ? source.points.map((v, i) => v + (i % 2 === 0 ? 16 : 16))
+      : cloned.points;
+  }
+  if (cloned.kind === "road") {
+    cloned.points = source.kind === "road"
+      ? source.points.map((v) => v + 16)
       : cloned.points;
   }
   if (cloned.kind === "measurement") {
