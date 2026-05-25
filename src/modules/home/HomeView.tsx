@@ -15,6 +15,7 @@ import { open as openDirDialog } from "@tauri-apps/plugin-dialog";
 import { Plus, FolderOpen, Briefcase, FileArchive } from "lucide-react";
 import { Button } from "@components/Button/Button";
 import { EmptyState } from "@components/EmptyState/EmptyState";
+import { AlphaDashboard } from "./AlphaDashboard";
 import { NewOccurrenceDialog } from "./NewOccurrenceDialog";
 import { ImportSicroappDialog } from "./ImportSicroappDialog";
 import { RecentOccurrenceCard } from "./RecentOccurrenceCard";
@@ -109,6 +110,8 @@ export function HomeView() {
             </Button>
           </div>
         </header>
+
+        <AlphaDashboard />
 
         <section>
           <header className={styles.sectionHeader}>

@@ -1,0 +1,158 @@
+/* AlphaDashboard — bloco Alpha da Home (MVP 8) */
+
+.section {
+  background: var(--sicro-surface-1);
+  border: 1px solid var(--sicro-divider);
+  border-radius: var(--radius-md);
+  padding: var(--space-4) var(--space-5);
+  margin-bottom: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+.title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--sicro-fg);
+}
+.subtitle {
+  margin: 4px 0 0;
+  color: var(--sicro-fg-muted);
+  font-size: var(--text-sm);
+}
+.path {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--sicro-fg-dim);
+}
+.path code {
+  font-family: var(--font-mono);
+  background: var(--sicro-surface-2);
+  padding: 0 4px;
+  border-radius: 2px;
+}
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.errorBanner {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: rgba(220, 60, 60, 0.08);
+  border: 1px solid rgba(220, 60, 60, 0.3);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  color: var(--sicro-danger);
+  font-size: var(--text-xs);
+}
+.feedback {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--sicro-success);
+}
+
+.counters {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: var(--space-2);
+}
+.counter {
+  background: var(--sicro-surface-2);
+  border: 1px solid var(--sicro-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.counterN {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  color: var(--sicro-fg);
+  font-weight: 600;
+}
+.counterL {
+  font-size: 10px;
+  color: var(--sicro-fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.counterOk { border-color: rgba(53, 196, 122, 0.4); }
+.counterOk .counterN { color: var(--sicro-success); }
+.counterWarn { border-color: rgba(230, 180, 80, 0.4); background: rgba(230, 180, 80, 0.08); }
+.counterWarn .counterN { color: var(--sicro-warning); }
+.counterCrit { border-color: rgba(220, 60, 60, 0.4); background: rgba(220, 60, 60, 0.10); }
+.counterCrit .counterN { color: var(--sicro-danger); }
+
+.statusLine {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.pillOk    { background: rgba(53, 196, 122, 0.12); color: var(--sicro-success); border: 1px solid rgba(53, 196, 122, 0.35); }
+.pillWarn  { background: rgba(230, 180, 80, 0.12); color: var(--sicro-warning); border: 1px solid rgba(230, 180, 80, 0.35); }
+.pillCrit  { background: rgba(220, 60, 60, 0.12); color: var(--sicro-danger);  border: 1px solid rgba(220, 60, 60, 0.35); }
+.pillInfo  { background: rgba(90, 169, 230, 0.10); color: var(--sicro-info);    border: 1px solid rgba(90, 169, 230, 0.35); }
+
+.warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--sicro-warning);
+}
+
+.shortcutsTitle {
+  margin-top: var(--space-2);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sicro-fg-dim);
+  font-weight: 500;
+}
+.shortcuts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: var(--space-2);
+}
+.shortcut {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--sicro-surface-2);
+  border: 1px solid var(--sicro-border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  color: var(--sicro-fg);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background var(--t-fast), border-color var(--t-fast);
+}
+.shortcut:hover {
+  background: var(--sicro-surface-3);
+  border-color: var(--sicro-accent);
+  color: var(--sicro-accent);
+}

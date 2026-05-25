@@ -42,10 +42,27 @@ src-tauri/gen/
 *.sicroapp
 *.sicrocampo
 *.sicrocroqui
+*.sicroimage
+*.sicrobackup
 exports/
+imagens/exports/
+imagens/originais/
+imagens/analises/
+videos/originais/
+videos/storyboards/
+croquis/exports/
+reports/
+backups/
 **/test-workspaces/
 **/exportados-de-teste/
 **/imports_index.json
+# Sidecar JSON files that travel with derived images / frames
+**/*_sidecar.json
+# SQLite of any workspace
+sicro.sqlite
+sicro.sqlite-journal
+sicro.sqlite-wal
+sicro.sqlite-shm
 
 # Video evidence — never commit real footage or per-frame test PNGs/JSON
 *.mp4

@@ -53,6 +53,11 @@ sha2 = "0.10"
 #   `base64` decodes the PNG produced by the frontend (Konva.toDataURL).
 base64 = "0.22"
 
+# MVP 8 — Consolidação Alpha.
+#   `which` resolve binários no PATH (usado pelo Relatório de Saúde
+#   para detectar ffmpeg/ffprobe).
+which = "6"
+
 # MVP 7 — Editor de Imagem Pericial.
 #   `image` is the canonical pure-Rust raster crate (PNG/JPEG/WebP read+write,
 #   pixel ops, conversions). It does NOT add system-library dependencies, so
