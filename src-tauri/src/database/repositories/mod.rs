@@ -6,3 +6,4 @@ pub mod import_repo;
 pub mod laudo_repo;
 pub mod media_asset_repo;
 pub mod occurrence_repo;
+pub mod video_repo;

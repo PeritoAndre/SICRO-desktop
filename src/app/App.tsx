@@ -5,6 +5,7 @@ import { HomeView } from "@modules/home/HomeView";
 import { LaudoModule } from "@modules/laudo/LaudoModule";
 import { DossieModule } from "@modules/dossie/DossieModule";
 import { CroquiModule } from "@modules/croqui/CroquiModule";
+import { VideoModule } from "@modules/video/VideoModule";
 import { PlaceholderModule } from "@modules/placeholders/PlaceholderModule";
 
 export function App() {
@@ -17,15 +18,7 @@ export function App() {
             <Route path="/dossie" element={<DossieModule />} />
             <Route path="/laudo" element={<LaudoModule />} />
             <Route path="/croqui" element={<CroquiModule />} />
-            <Route
-              path="/video"
-              element={
-                <PlaceholderModule
-                  module="Vídeo"
-                  scheduled="MVP 5 (após Spike F — Video Engine)"
-                />
-              }
-            />
+            <Route path="/video" element={<VideoModule />} />
             <Route
               path="/imagens"
               element={
