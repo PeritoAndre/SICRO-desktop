@@ -34,6 +34,9 @@ pub enum EvidenceKind {
     Laudo,
     LaudoExport,
     ImportedPackage,
+    // MVP 7 — Editor de Imagem Pericial
+    ImageAnalysis,
+    ImageExport,
     Other,
 }
 
@@ -49,6 +52,8 @@ impl EvidenceKind {
             EvidenceKind::Laudo => "laudo",
             EvidenceKind::LaudoExport => "laudo_export",
             EvidenceKind::ImportedPackage => "imported_package",
+            EvidenceKind::ImageAnalysis => "image_analysis",
+            EvidenceKind::ImageExport => "image_export",
             EvidenceKind::Other => "other",
         }
     }
@@ -138,6 +143,9 @@ pub struct RegistrySummary {
     pub laudos: u32,
     pub laudo_exports: u32,
     pub imported_packages: u32,
+    // MVP 7
+    pub image_analyses: u32,
+    pub image_exports: u32,
     pub total_items: u32,
     pub items_with_relative_path: u32,
     pub linked_in_laudos: u32,

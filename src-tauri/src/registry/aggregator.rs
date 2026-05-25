@@ -18,8 +18,8 @@ use rusqlite::Connection;
 use uuid::Uuid;
 
 use crate::database::repositories::{
-    croqui_repo, evidence_link_repo, export_repo, import_repo, laudo_repo,
-    media_asset_repo, video_repo,
+    croqui_repo, evidence_link_repo, export_repo, image_analysis_repo,
+    import_repo, laudo_repo, media_asset_repo, video_repo,
 };
 use crate::error::Result;
 use crate::models::{
@@ -255,6 +255,72 @@ pub fn build_registry(
     }
 
     // ------------------------------------------------------------------
+    // Image analyses + derived exports (MVP 7)
+    let analyses = image_analysis_repo::list_by_occurrence(conn, occurrence_id)?;
+    for a in &analyses {
+        out.push(EvidenceRegistryItem {
+            id: format!("image_analysis:{}", a.id),
+            occurrence_id: *occurrence_id,
+            kind: EvidenceKind::ImageAnalysis,
+            subtype: Some(a.source_kind.as_str().to_string()),
+            title: Some(a.title.clone()),
+            description: Some(format!("Sessão de análise — {}", a.source_kind.as_str())),
+            source_module: "image_editor".to_string(),
+            original_id: a.source_id.clone(),
+            relative_path: Some(a.analysis_relative_path.clone()),
+            sidecar_relative_path: None,
+            hash_sha256: a.original_hash_sha256.clone(),
+            size_bytes: None,
+            mime_type: Some("application/json".to_string()),
+            created_at: Some(a.created_at),
+            updated_at: Some(a.updated_at),
+            status: Some(a.status.clone()),
+            integrity_status: IntegrityStatus::Unknown,
+            integrity_detail: None,
+            linked_laudos_count: 0,
+            metadata_json: a.metadata_json.clone(),
+        });
+    }
+    let image_exports = image_analysis_repo::list_exports_by_occurrence(
+        conn, occurrence_id,
+    )?;
+    for e in &image_exports {
+        out.push(EvidenceRegistryItem {
+            id: format!("image_export:{}", e.id),
+            occurrence_id: *occurrence_id,
+            kind: EvidenceKind::ImageExport,
+            subtype: Some(e.format.clone()),
+            title: Some(format!(
+                "Imagem derivada {}",
+                short_id(e.image_analysis_id)
+            )),
+            description: Some(format!(
+                "{} × {}",
+                e.width.unwrap_or(0),
+                e.height.unwrap_or(0)
+            )),
+            source_module: "image_editor".to_string(),
+            original_id: Some(e.image_analysis_id.to_string()),
+            relative_path: Some(e.output_relative_path.clone()),
+            sidecar_relative_path: e.sidecar_relative_path.clone(),
+            hash_sha256: e.hash_sha256.clone(),
+            size_bytes: None,
+            mime_type: Some(match e.format.as_str() {
+                "png" => "image/png".to_string(),
+                "jpg" | "jpeg" => "image/jpeg".to_string(),
+                _ => "application/octet-stream".to_string(),
+            }),
+            created_at: Some(e.created_at),
+            updated_at: Some(e.created_at),
+            status: None,
+            integrity_status: IntegrityStatus::Unknown,
+            integrity_detail: None,
+            linked_laudos_count: 0,
+            metadata_json: e.operation_summary_json.clone(),
+        });
+    }
+
+    // ------------------------------------------------------------------
     // Imported packages (.sicroapp)
     //
     // `imports` is workspace-scoped (one row per package brought in).
@@ -323,6 +389,8 @@ pub fn build_summary(items: &[EvidenceRegistryItem]) -> RegistrySummary {
             EvidenceKind::Laudo => s.laudos += 1,
             EvidenceKind::LaudoExport => s.laudo_exports += 1,
             EvidenceKind::ImportedPackage => s.imported_packages += 1,
+            EvidenceKind::ImageAnalysis => s.image_analyses += 1,
+            EvidenceKind::ImageExport => s.image_exports += 1,
             EvidenceKind::Other => {}
         }
         if item.relative_path.is_some() {

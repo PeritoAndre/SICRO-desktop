@@ -7,6 +7,7 @@ import { DossieModule } from "@modules/dossie/DossieModule";
 import { CroquiModule } from "@modules/croqui/CroquiModule";
 import { VideoModule } from "@modules/video/VideoModule";
 import { EvidenciasModule } from "@modules/evidencias/EvidenciasModule";
+import { ImagemModule } from "@modules/imagem/ImagemModule";
 import { PlaceholderModule } from "@modules/placeholders/PlaceholderModule";
 
 export function App() {
@@ -21,14 +22,10 @@ export function App() {
             <Route path="/croqui" element={<CroquiModule />} />
             <Route path="/video" element={<VideoModule />} />
             <Route path="/evidencias" element={<EvidenciasModule />} />
+            <Route path="/imagem" element={<ImagemModule />} />
             <Route
               path="/imagens"
-              element={
-                <PlaceholderModule
-                  module="Imagens"
-                  scheduled="MVP 6 (Imagens e Mídias)"
-                />
-              }
+              element={<Navigate to="/imagem" replace />}
             />
             <Route
               path="/midias"

@@ -10,6 +10,7 @@ pub mod error;
 pub mod exporters;
 pub mod filesystem;
 pub mod hashing;
+pub mod image_editor;
 pub mod importer;
 pub mod models;
 pub mod registry;
@@ -99,6 +100,16 @@ pub fn run() {
             commands::registry_commands::open_evidence_file,
             commands::registry_commands::reveal_evidence_in_folder,
             commands::registry_commands::generate_workspace_integrity_report,
+            // editor de imagem pericial (MVP 7)
+            commands::image_commands::create_image_analysis_from_evidence,
+            commands::image_commands::create_image_analysis_from_file,
+            commands::image_commands::list_image_analyses,
+            commands::image_commands::read_image_analysis,
+            commands::image_commands::save_image_analysis,
+            commands::image_commands::export_image_derivative,
+            commands::image_commands::read_image_asset,
+            commands::image_commands::get_image_metadata,
+            commands::image_commands::list_image_operation_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SICRO Desktop");

@@ -7,6 +7,7 @@ pub mod croqui;
 pub mod dossie;
 pub mod evidence;
 pub mod export;
+pub mod image_analysis;
 pub mod import;
 pub mod laudo;
 pub mod occurrence;
@@ -25,6 +26,11 @@ pub use export::{Export, ExportKind};
 pub use import::{
     EvidenceItem, HashMismatch, Import, ImportReport, ImportResult, ImportSicroappInput,
     ImportStatus, MediaAsset, MediaAssetType,
+};
+pub use image_analysis::{
+    BackendAdjustments, BackendOperation, CreateImageAnalysisInput, ExportImageInput,
+    ImageAnalysis, ImageAssetBytes, ImageExport, ImageMetadata, ImageOperationLog,
+    ImageSourceKind, ImportLocalImageInput,
 };
 pub use laudo::{Laudo, LaudoDoc, LaudoStatus, NewLaudoInput};
 pub use registry::{

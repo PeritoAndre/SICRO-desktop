@@ -1,0 +1,328 @@
+/* ImageEditor — MVP 7 */
+
+.wrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--sicro-bg);
+  color: var(--sicro-fg);
+}
+
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px var(--space-3);
+  border-bottom: 1px solid var(--sicro-divider);
+  background: var(--sicro-surface-1);
+  flex-shrink: 0;
+  gap: var(--space-2);
+}
+.backBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  color: var(--sicro-fg-muted);
+  font-size: var(--text-xs);
+  padding: 4px 6px;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.backBtn:hover {
+  color: var(--sicro-fg);
+  background: var(--sicro-surface-2);
+}
+.titleInput {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--sicro-fg);
+  font-size: var(--text-md);
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  flex: 1;
+  max-width: 520px;
+}
+.titleInput:focus,
+.titleInput:hover {
+  border-color: var(--sicro-border);
+  background: var(--sicro-surface-2);
+  outline: none;
+}
+
+.body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+/* ----- Toolbar lateral ----- */
+.toolbar {
+  width: 56px;
+  background: var(--sicro-surface-1);
+  border-right: 1px solid var(--sicro-divider);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-2) 4px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.toolBtn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--sicro-fg-muted);
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.toolBtn:hover {
+  background: var(--sicro-surface-2);
+  color: var(--sicro-fg);
+}
+.toolBtnActive {
+  background: var(--sicro-surface-2);
+  color: var(--sicro-accent);
+  border-color: rgba(90, 169, 230, 0.45);
+}
+.toolDivider {
+  height: 1px;
+  background: var(--sicro-divider);
+  margin: 4px 6px;
+}
+
+/* ----- Canvas ----- */
+.canvasArea {
+  flex: 1;
+  position: relative;
+  background: #0f1419;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.canvasArea > div:first-child {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ----- Painel direito ----- */
+.right {
+  width: 300px;
+  background: var(--sicro-surface-1);
+  border-left: 1px solid var(--sicro-divider);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  flex-shrink: 0;
+}
+.rightTabs {
+  display: flex;
+  border-bottom: 1px solid var(--sicro-divider);
+  background: var(--sicro-surface-2);
+  flex-shrink: 0;
+}
+.rightTab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--sicro-fg-muted);
+  font-size: 11px;
+  padding: 6px 4px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  font-family: inherit;
+}
+.rightTab:hover {
+  color: var(--sicro-fg);
+}
+.rightTabActive {
+  color: var(--sicro-accent);
+  border-bottom-color: var(--sicro-accent);
+}
+.rightBody {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.sectionTitle {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sicro-fg-dim);
+  margin: 0 0 4px;
+  font-weight: 500;
+}
+
+/* sliders */
+.slider {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--sicro-fg-muted);
+}
+.slider header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.slider header strong {
+  color: var(--sicro-fg);
+  font-weight: 500;
+}
+.slider header code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--sicro-fg-dim);
+}
+.slider input[type="range"] {
+  width: 100%;
+  accent-color: var(--sicro-accent);
+}
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--sicro-fg-muted);
+}
+.resetBtn {
+  background: transparent;
+  border: 1px solid var(--sicro-border);
+  color: var(--sicro-fg-muted);
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  align-self: flex-start;
+  font-family: inherit;
+}
+.resetBtn:hover {
+  color: var(--sicro-fg);
+  border-color: var(--sicro-fg-muted);
+}
+
+/* Camadas / Anotações */
+.objectList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.objectItem {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 2px 4px;
+  font-size: 11px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.objectItem:hover {
+  background: rgba(90, 169, 230, 0.08);
+}
+.objectItemActive {
+  background: rgba(90, 169, 230, 0.18);
+}
+.objectVisBtn {
+  background: transparent;
+  border: none;
+  color: var(--sicro-fg-dim);
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+}
+.objectVisBtn:hover {
+  color: var(--sicro-fg);
+}
+.objectLabel {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.objectKind {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--sicro-fg-dim);
+  min-width: 22px;
+}
+
+.metaList {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 2px var(--space-2);
+  font-size: 11px;
+  margin: 0;
+}
+.metaList dt {
+  color: var(--sicro-fg-dim);
+}
+.metaList dd {
+  color: var(--sicro-fg);
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  word-break: break-all;
+}
+
+.logEntry {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 6px;
+  border-left: 2px solid var(--sicro-border);
+  background: var(--sicro-surface-2);
+  border-radius: 2px;
+  font-size: 11px;
+}
+.logEntry code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--sicro-fg-dim);
+}
+
+/* ----- Status bar ----- */
+.statusBar {
+  background: var(--sicro-surface-2);
+  border-top: 1px solid var(--sicro-divider);
+  padding: 4px var(--space-3);
+  font-size: 11px;
+  color: var(--sicro-fg-muted);
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  flex-wrap: wrap;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.statusBar code {
+  background: var(--sicro-surface-1);
+  padding: 0 4px;
+  border-radius: 2px;
+  color: var(--sicro-fg);
+}
+.statusFeedback {
+  margin-left: auto;
+  color: var(--sicro-accent);
+  font-family: var(--font-ui);
+}
+
+/* ----- Top bar actions ----- */
+.topActions {
+  display: flex;
+  gap: 6px;
+}
