@@ -1,0 +1,87 @@
+.rail {
+  width: var(--activity-rail-width);
+  background: var(--sicro-surface-1);
+  border-right: 1px solid var(--sicro-divider);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: var(--space-3) 0;
+  gap: var(--space-2);
+  flex-shrink: 0;
+}
+
+.brand {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--sicro-accent), #b8862e);
+  color: #1a1305;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: var(--text-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--space-3);
+  letter-spacing: 0.5px;
+}
+
+.divider {
+  width: 32px;
+  height: 1px;
+  background: var(--sicro-divider);
+  margin: var(--space-1) 0;
+  flex-shrink: 0;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.item {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--sicro-fg-muted);
+  transition: background var(--t-fast), color var(--t-fast);
+  text-decoration: none;
+}
+
+.item:hover {
+  background: var(--sicro-surface-2);
+  color: var(--sicro-fg);
+}
+
+.item:focus-visible {
+  outline: 2px solid var(--sicro-accent);
+  outline-offset: 2px;
+}
+
+.itemActive {
+  background: var(--sicro-accent-soft);
+  color: var(--sicro-accent);
+}
+
+.itemActive::before {
+  content: "";
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 22px;
+  background: var(--sicro-accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
+.itemDisabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* Tooltip via title attribute is enough for the spike; can be replaced
+   by a real Tooltip component in a later iteration. */

@@ -1,0 +1,41 @@
+[package]
+name = "sicro-desktop"
+version = "2.0.0-alpha.0"
+description = "SICRO 2.0 — Sistema Integrado de Criminalística e Operações"
+authors = ["SICRO Team"]
+edition = "2021"
+rust-version = "1.77"
+
+# Library is what tauri-app entry points consume; main.rs only re-exports it.
+[lib]
+name = "sicro_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# SQLite — `bundled` makes deployment self-contained (no system libsqlite3 dependency).
+rusqlite = { version = "0.31", features = ["bundled"] }
+
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
+
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Cross-platform user/data directories. `directories` is a thin wrapper around
+# the XDG/KnownFolders APIs.
+directories = "5"
+
+[features]
+# This feature is enabled when building for the Tauri release.
+# Production builds bake the WebView assets in.
+custom-protocol = ["tauri/custom-protocol"]
