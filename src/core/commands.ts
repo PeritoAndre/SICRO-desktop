@@ -33,6 +33,12 @@ import type {
   TimelineEvent,
   Trace,
 } from "@domain/dossie";
+import type {
+  Croqui,
+  CroquiDocPayload,
+  ExportCroquiPngInput,
+  NewCroquiInput,
+} from "@domain/croqui";
 import { toSicroError, type SicroError } from "./errors";
 
 async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -250,6 +256,61 @@ export const commands = {
    */
   rehydrateDossie(workspacePath: string): Promise<RehydrateOutcome> {
     return safeInvoke<RehydrateOutcome>("rehydrate_dossie", { workspacePath });
+  },
+
+  // ----- Croqui (Spike E) -----
+
+  /** Creates an empty .sicrocroqui + row in the `croquis` table. */
+  createCroqui(
+    workspacePath: string,
+    input: NewCroquiInput,
+  ): Promise<CroquiDocPayload> {
+    return safeInvoke<CroquiDocPayload>("create_croqui", {
+      workspacePath,
+      input,
+    });
+  },
+
+  /** Lists every croqui of the active occurrence (most recent first). */
+  listCroquis(workspacePath: string): Promise<Croqui[]> {
+    return safeInvoke<Croqui[]>("list_croquis", { workspacePath });
+  },
+
+  /** Reads a croqui (row + full .sicrocroqui envelope). */
+  readCroqui(workspacePath: string, croquiId: string): Promise<CroquiDocPayload> {
+    return safeInvoke<CroquiDocPayload>("read_croqui", {
+      workspacePath,
+      croquiId,
+    });
+  },
+
+  /** Overwrites the .sicrocroqui on disk + bumps updated_at. */
+  saveCroqui(
+    workspacePath: string,
+    croquiId: string,
+    doc: unknown,
+  ): Promise<Croqui> {
+    return safeInvoke<Croqui>("save_croqui", {
+      workspacePath,
+      croquiId,
+      doc,
+    });
+  },
+
+  /**
+   * Persist a PNG export produced by Konva.toDataURL(). Returns the
+   * workspace-relative path of the saved PNG.
+   */
+  exportCroquiPng(
+    workspacePath: string,
+    croquiId: string,
+    input: ExportCroquiPngInput,
+  ): Promise<string> {
+    return safeInvoke<string>("export_croqui_png", {
+      workspacePath,
+      croquiId,
+      input,
+    });
   },
 } as const;
 

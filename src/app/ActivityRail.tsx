@@ -33,7 +33,7 @@ const items: RailItem[] = [
   { to: "/", label: "Início", icon: HomeIcon },
   { to: "/dossie", label: "Dossiê", icon: FolderOpen },
   { to: "/laudo", label: "Laudo", icon: FileText },
-  { to: "/croqui", label: "Croqui", icon: Shapes, disabled: true },
+  { to: "/croqui", label: "Croqui", icon: Shapes },
   { to: "/video", label: "Vídeo", icon: Film, disabled: true },
   { to: "/imagens", label: "Imagens", icon: Camera, disabled: true },
   { to: "/midias", label: "Mídias", icon: ClipboardList, disabled: true },

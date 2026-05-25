@@ -49,6 +49,10 @@ docx-rs = "0.4"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 
+# Spike E — Croqui Engine.
+#   `base64` decodes the PNG produced by the frontend (Konva.toDataURL).
+base64 = "0.22"
+
 [dev-dependencies]
 tempfile = "3"
 

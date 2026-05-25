@@ -4,6 +4,7 @@ import { WorkspaceProvider } from "./WorkspaceProvider";
 import { HomeView } from "@modules/home/HomeView";
 import { LaudoModule } from "@modules/laudo/LaudoModule";
 import { DossieModule } from "@modules/dossie/DossieModule";
+import { CroquiModule } from "@modules/croqui/CroquiModule";
 import { PlaceholderModule } from "@modules/placeholders/PlaceholderModule";
 
 export function App() {
@@ -15,15 +16,7 @@ export function App() {
             <Route path="/" element={<HomeView />} />
             <Route path="/dossie" element={<DossieModule />} />
             <Route path="/laudo" element={<LaudoModule />} />
-            <Route
-              path="/croqui"
-              element={
-                <PlaceholderModule
-                  module="Croqui"
-                  scheduled="MVP 4 (após Spike E — Croqui Engine)"
-                />
-              }
-            />
+            <Route path="/croqui" element={<CroquiModule />} />
             <Route
               path="/video"
               element={

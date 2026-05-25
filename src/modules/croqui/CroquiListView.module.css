@@ -1,0 +1,127 @@
+.wrap {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--sicro-bg);
+}
+
+.container {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.header {
+  margin-bottom: var(--space-2);
+}
+.title {
+  margin: 0;
+  font-size: var(--text-xl);
+  color: var(--sicro-fg);
+}
+.subtitle {
+  margin: 4px 0 0;
+  font-size: var(--text-sm);
+  color: var(--sicro-fg-muted);
+}
+.subtitle code {
+  font-family: var(--font-mono);
+  background: var(--sicro-surface-2);
+  padding: 0 4px;
+  border-radius: 2px;
+}
+
+.sectionTitle {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--sicro-fg-dim);
+  margin: 0 0 var(--space-2);
+  font-weight: 500;
+}
+
+.createCard {
+  background: var(--sicro-surface-1);
+  border: 1px solid var(--sicro-divider);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+}
+.createRow {
+  display: flex;
+  gap: var(--space-2);
+  align-items: stretch;
+}
+.titleInput {
+  flex: 1;
+  background: var(--sicro-surface-2);
+  border: 1px solid var(--sicro-border);
+  color: var(--sicro-fg);
+  height: 32px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+}
+
+.error {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-xs);
+  color: var(--sicro-danger);
+}
+
+.dim {
+  color: var(--sicro-fg-dim);
+  font-size: var(--text-sm);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  background: var(--sicro-surface-1);
+  border: 1px solid var(--sicro-border);
+  border-radius: var(--radius-md);
+}
+.rowMain {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.rowTitle {
+  color: var(--sicro-fg);
+  font-size: var(--text-sm);
+}
+.rowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: 10px;
+  color: var(--sicro-fg-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  align-items: center;
+}
+.chip {
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--sicro-surface-2);
+  border: 1px solid var(--sicro-border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--sicro-fg-muted);
+}

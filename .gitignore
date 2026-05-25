@@ -41,6 +41,7 @@ src-tauri/gen/
 *.sicrodoc
 *.sicroapp
 *.sicrocampo
+*.sicrocroqui
 exports/
 **/test-workspaces/
 **/exportados-de-teste/

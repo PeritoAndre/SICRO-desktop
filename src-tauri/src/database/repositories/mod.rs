@@ -1,3 +1,4 @@
+pub mod croqui_repo;
 pub mod dossie_repo;
 pub mod evidence_item_repo;
 pub mod export_repo;

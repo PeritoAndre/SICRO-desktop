@@ -68,6 +68,12 @@ pub fn run() {
             commands::dossie_commands::list_dossie_timeline,
             commands::dossie_commands::get_dossie_stats,
             commands::dossie_commands::rehydrate_dossie,
+            // croqui (Spike E)
+            commands::croqui_commands::create_croqui,
+            commands::croqui_commands::list_croquis,
+            commands::croqui_commands::read_croqui,
+            commands::croqui_commands::save_croqui,
+            commands::croqui_commands::export_croqui_png,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SICRO Desktop");
