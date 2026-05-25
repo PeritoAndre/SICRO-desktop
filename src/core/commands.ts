@@ -76,6 +76,11 @@ import type {
   ImportLocalImageInput,
   SaveImageAnalysisInput,
 } from "@domain/image_analysis";
+import type {
+  BackupArtifact,
+  HealthReportArtifact,
+  SystemHealthSnapshot,
+} from "@domain/alpha";
 import { toSicroError, type SicroError } from "./errors";
 
 async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -682,6 +687,51 @@ export const commands = {
       analysisId,
       limit,
     });
+  },
+
+  // ----- Consolidação Alpha (MVP 8) -----
+
+  /**
+   * Gera um `.sicrobackup` (ZIP) do workspace ativo. `destination`
+   * opcional escolhe outra pasta; padrão é `<workspace>/backups/`.
+   * `boLabel` ajuda o nome do arquivo.
+   */
+  generateWorkspaceBackup(
+    workspacePath: string,
+    destination?: string,
+    boLabel?: string,
+  ): Promise<BackupArtifact> {
+    return safeInvoke<BackupArtifact>("generate_workspace_backup", {
+      workspacePath,
+      destination: destination ?? null,
+      boLabel: boLabel ?? null,
+    });
+  },
+
+  /**
+   * Snapshot rápido (JSON) do estado de saúde do app — versão do app,
+   * dependências externas, contadores do workspace ativo, integridade.
+   */
+  getSystemHealthSnapshot(
+    workspacePath?: string | null,
+  ): Promise<SystemHealthSnapshot> {
+    return safeInvoke<SystemHealthSnapshot>("get_system_health_snapshot", {
+      workspacePath: workspacePath ?? null,
+    });
+  },
+
+  /**
+   * Grava o relatório de saúde como HTML auto-suficiente em
+   * `<workspace>/reports/system_health_<TS>.html` e retorna o
+   * descritor.
+   */
+  generateSystemHealthReport(
+    workspacePath?: string | null,
+  ): Promise<HealthReportArtifact> {
+    return safeInvoke<HealthReportArtifact>(
+      "generate_system_health_report",
+      { workspacePath: workspacePath ?? null },
+    );
   },
 } as const;
 

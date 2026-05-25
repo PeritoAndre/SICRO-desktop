@@ -110,6 +110,10 @@ pub fn run() {
             commands::image_commands::read_image_asset,
             commands::image_commands::get_image_metadata,
             commands::image_commands::list_image_operation_logs,
+            // consolidação alpha (MVP 8)
+            commands::alpha_commands::generate_workspace_backup,
+            commands::alpha_commands::get_system_health_snapshot,
+            commands::alpha_commands::generate_system_health_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SICRO Desktop");
