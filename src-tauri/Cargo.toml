@@ -35,6 +35,15 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # the XDG/KnownFolders APIs.
 directories = "5"
 
+# DOCX export (Spike C). Pure-Rust crate — no system dependencies.
+docx-rs = "0.4"
+
+[dev-dependencies]
+# Integration tests for the DOCX exporter unzip the artefact and read
+# `word/document.xml` to verify the walker emitted every text leaf.
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+tempfile = "3"
+
 [features]
 # This feature is enabled when building for the Tauri release.
 # Production builds bake the WebView assets in.

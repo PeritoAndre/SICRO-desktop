@@ -7,6 +7,7 @@
 pub mod commands;
 pub mod database;
 pub mod error;
+pub mod exporters;
 pub mod filesystem;
 pub mod hashing;
 pub mod models;
@@ -45,6 +46,11 @@ pub fn run() {
             commands::laudo_commands::list_laudos,
             commands::laudo_commands::read_laudo,
             commands::laudo_commands::save_laudo,
+            // export (Spike C)
+            commands::export_commands::export_laudo_html,
+            commands::export_commands::export_laudo_pdf,
+            commands::export_commands::export_laudo_docx,
+            commands::export_commands::list_laudo_exports,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SICRO Desktop");

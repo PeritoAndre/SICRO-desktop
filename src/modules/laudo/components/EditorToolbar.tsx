@@ -25,6 +25,8 @@ import {
   Tag,
   Underline as UnderlineIcon,
 } from "lucide-react";
+import { ExportMenu } from "./ExportMenu";
+import type { SicroDoc } from "../document-engine";
 import styles from "./EditorToolbar.module.css";
 
 interface EditorToolbarProps {
@@ -33,6 +35,14 @@ interface EditorToolbarProps {
   isPreviewOpen: boolean;
   onSave: () => void;
   onTogglePreview: () => void;
+  /** Workspace + laudo id + current doc; required only by the export menu.
+   *  When `laudoId`/`workspacePath` are missing the export menu is hidden.
+   *  `laudoTitle` surfaces which laudo will be exported, so the user can't
+   *  accidentally export the wrong one. */
+  workspacePath?: string;
+  laudoId?: string;
+  laudoTitle?: string;
+  doc?: SicroDoc | null;
 }
 
 export function EditorToolbar({
@@ -41,6 +51,10 @@ export function EditorToolbar({
   isPreviewOpen,
   onSave,
   onTogglePreview,
+  workspacePath,
+  laudoId,
+  laudoTitle,
+  doc,
 }: EditorToolbarProps) {
   if (!editor) {
     return <div className={styles.toolbar} aria-hidden />;
@@ -227,6 +241,16 @@ export function EditorToolbar({
       >
         <Eye size={14} /> Prévia HTML
       </button>
+
+      {workspacePath && laudoId && (
+        <ExportMenu
+          workspacePath={workspacePath}
+          laudoId={laudoId}
+          laudoTitle={laudoTitle}
+          doc={doc ?? null}
+        />
+      )}
+
       <button
         type="button"
         className={styles.primary}
