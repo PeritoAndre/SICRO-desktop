@@ -14,6 +14,7 @@
 
 import {
   CURRENT_SCHEMA_VERSION,
+  type ObjectCategory,
   type SicroCroquiCanvas,
   type SicroCroquiDoc,
   type SicroCroquiLayer,
@@ -60,7 +61,15 @@ export function coerceCroquiDoc(raw: unknown): SicroCroquiDoc {
   const layers = Array.isArray(o.layers)
     ? (o.layers as SicroCroquiLayer[])
     : DEFAULT_LAYERS;
-  const objects = Array.isArray(o.objects) ? (o.objects as SicroObject[]) : [];
+  // MVP 6: assign a default `category` to every object the older schema
+  // didn't carry one for. This is purely additive — old envelopes load
+  // without intervention and the new field merely fuels the layer panel.
+  const objects = Array.isArray(o.objects)
+    ? (o.objects as SicroObject[]).map((obj) => ({
+        ...obj,
+        category: obj.category ?? inferCategory(obj),
+      }))
+    : [];
 
   return {
     schema_version:
@@ -126,6 +135,52 @@ function coerceBackgroundImage(
     opacity: numberField(o, "opacity") ?? 1,
     locked: o.locked !== false,
   };
+}
+
+/** Project an object onto the layer-panel category buckets. */
+export function inferCategory(obj: SicroObject): ObjectCategory {
+  switch (obj.kind) {
+    case "vehicle":
+      return "veiculos";
+    case "measurement":
+      return "medidas";
+    case "text":
+      return "anotacoes";
+    case "line":
+      if (obj.subtype === "r1" || obj.subtype === "r2") return "referenciais";
+      if (
+        obj.subtype === "road" ||
+        obj.subtype === "lane" ||
+        obj.subtype === "lane_separator" ||
+        obj.subtype === "sidewalk" ||
+        obj.subtype === "arrow"
+      ) {
+        return "vias";
+      }
+      return "outros";
+    case "marker":
+      if (
+        obj.subtype === "collision_x" ||
+        obj.subtype === "brake_mark" ||
+        obj.subtype === "drag_mark" ||
+        obj.subtype === "fluid" ||
+        obj.subtype === "blood" ||
+        obj.subtype === "debris" ||
+        obj.subtype === "trace_point"
+      ) {
+        return "vestigios";
+      }
+      if (
+        obj.subtype === "pedestrian" ||
+        obj.subtype === "body" ||
+        obj.subtype === "victim_point"
+      ) {
+        return "vestigios"; // pessoas no contexto pericial entram em vestígios
+      }
+      return "outros";
+    default:
+      return "outros";
+  }
 }
 
 function stringField(o: Record<string, unknown>, key: string): string | null {

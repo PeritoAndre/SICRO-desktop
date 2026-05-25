@@ -4,3 +4,4 @@ export * from "./schema";
 export * from "./geometry";
 export * from "./serializer";
 export * from "./factories";
+export * from "./templates";

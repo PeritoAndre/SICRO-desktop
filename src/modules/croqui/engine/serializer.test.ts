@@ -97,6 +97,54 @@ describe("coerceCroquiDoc", () => {
     expect(d.objects).toHaveLength(1);
     expect(d.objects[0]?.kind).toBe("vehicle");
   });
+
+  // MVP 6 — backward compatibility with v0.1 envelopes.
+  it("loads a v0.1 envelope without crashing and assigns categories", () => {
+    const d = coerceCroquiDoc({
+      schema_version: "0.1",
+      croqui_id: "11111111-1111-4111-8111-111111111111",
+      occurrence_id: "22222222-2222-4222-8222-222222222222",
+      title: "Croqui legado",
+      created_at: "2026-05-25T13:00:00.000Z",
+      updated_at: "2026-05-25T13:00:00.000Z",
+      objects: [
+        {
+          id: "x1",
+          layer_id: "layer_objects",
+          kind: "marker",
+          subtype: "collision_x",
+          x: 100,
+          y: 50,
+          size: 24,
+        },
+        {
+          id: "v1",
+          layer_id: "layer_objects",
+          kind: "vehicle",
+          x: 200,
+          y: 200,
+          width: 80,
+          height: 40,
+          rotation: 0,
+        },
+        {
+          id: "r1",
+          layer_id: "layer_objects",
+          kind: "line",
+          subtype: "r1",
+          points: [0, 0, 100, 0],
+          stroke_width: 4,
+        },
+      ],
+    });
+    expect(d.objects).toHaveLength(3);
+    // Aggregator/UI relies on `category` — v0.1 objects must surface a
+    // defaulted value.
+    const cats = d.objects.map((o) => o.category);
+    expect(cats).toContain("vestigios");
+    expect(cats).toContain("veiculos");
+    expect(cats).toContain("referenciais");
+  });
 });
 
 describe("serializeCroquiDoc", () => {

@@ -11,14 +11,42 @@
 import { useCallback, useState } from "react";
 import type { SicroObject, SicroPoint } from "../engine";
 
+/**
+ * Tool keys. MVP 6 adds dedicated tools per vehicle subtype, per marker
+ * subtype, per line subtype and a generic `template:<id>` shape for road
+ * templates. Keeping a single string union (instead of nested structs)
+ * makes the toolbar trivially mappable.
+ */
 export type Tool =
   | "select"
   | "pan"
-  | "vehicle"
+  // Vehicles
+  | "vehicle"            // legacy alias for "vehicle_car"
+  | "vehicle_car"
+  | "vehicle_sedan"
+  | "vehicle_suv"
+  | "vehicle_hatch"
+  | "vehicle_moto"
+  | "vehicle_truck"
+  | "vehicle_bike"
+  // Lines
   | "line_road"
+  | "line_lane"
+  | "line_lane_separator"
+  | "line_sidewalk"
+  | "line_arrow"
   | "line_r1"
   | "line_r2"
+  // Markers (collision + vestígios + pessoas)
   | "marker_x"
+  | "marker_brake"
+  | "marker_drag"
+  | "marker_fluid"
+  | "marker_blood"
+  | "marker_debris"
+  | "marker_pedestrian"
+  | "marker_body"
+  // Annotation / measurement / scale
   | "text"
   | "measurement"
   | "set_scale";
@@ -47,6 +75,8 @@ export function useEditorState() {
   const [pointerWorld, setPointerWorld] = useState<SicroPoint>({ x: 0, y: 0 });
   /** Undo stack: snapshots of `objects` arrays before each mutation. */
   const [history, setHistory] = useState<SicroObject[][]>([]);
+  /** Redo stack (MVP 6) — fed by undo, cleared on a fresh mutation. */
+  const [redoStack, setRedoStack] = useState<SicroObject[][]>([]);
 
   const pushHistory = useCallback((snapshot: SicroObject[]) => {
     setHistory((h) => {
@@ -55,6 +85,8 @@ export function useEditorState() {
       if (next.length > 50) next.shift();
       return next;
     });
+    // Any new mutation invalidates the redo branch.
+    setRedoStack([]);
   }, []);
 
   const popHistory = useCallback((): SicroObject[] | null => {
@@ -63,6 +95,23 @@ export function useEditorState() {
       if (h.length === 0) return h;
       popped = h[h.length - 1] ?? null;
       return h.slice(0, -1);
+    });
+    return popped;
+  }, []);
+
+  const pushRedo = useCallback((snapshot: SicroObject[]) => {
+    setRedoStack((r) => {
+      const next = [...r, snapshot];
+      if (next.length > 50) next.shift();
+      return next;
+    });
+  }, []);
+  const popRedo = useCallback((): SicroObject[] | null => {
+    let popped: SicroObject[] | null = null;
+    setRedoStack((r) => {
+      if (r.length === 0) return r;
+      popped = r[r.length - 1] ?? null;
+      return r.slice(0, -1);
     });
     return popped;
   }, []);
@@ -81,6 +130,9 @@ export function useEditorState() {
     history,
     pushHistory,
     popHistory,
+    redoStack,
+    pushRedo,
+    popRedo,
   };
 }
 
