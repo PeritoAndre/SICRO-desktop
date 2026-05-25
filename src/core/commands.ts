@@ -57,6 +57,13 @@ import type {
   EvidenceLink,
   RecordEvidenceLinkInput,
 } from "@domain/evidence";
+import type {
+  EvidenceRegistryItem,
+  IntegrityReportArtifact,
+  RegistrySummary,
+  VerifyOptions,
+  WorkspaceIntegrityReport,
+} from "@domain/evidence_registry";
 import { toSicroError, type SicroError } from "./errors";
 
 async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -479,6 +486,94 @@ export const commands = {
       workspacePath,
       relativePath,
     });
+  },
+
+  // ----- Central de Evidências + Integridade (MVP 5) -----
+
+  /**
+   * Read-only consolidated registry of every photo, croqui, video,
+   * frame, laudo and export of the workspace. Cheap: no filesystem
+   * verification is done here — `integrity_status` stays as
+   * `"unknown"`. Use `verifyWorkspaceIntegrity` for the verified view.
+   */
+  listEvidenceRegistryItems(
+    workspacePath: string,
+  ): Promise<EvidenceRegistryItem[]> {
+    return safeInvoke<EvidenceRegistryItem[]>(
+      "list_evidence_registry_items",
+      { workspacePath },
+    );
+  },
+
+  /**
+   * Counters used by the "Resumo" tab. Includes the lightweight
+   * integrity probe so missing files / unsafe paths are reflected in
+   * the totals.
+   */
+  getEvidenceRegistrySummary(
+    workspacePath: string,
+  ): Promise<RegistrySummary> {
+    return safeInvoke<RegistrySummary>(
+      "get_evidence_registry_summary",
+      { workspacePath },
+    );
+  },
+
+  /**
+   * Full integrity check. Pass `{ deep: true }` to recompute SHA-256
+   * for items that store a hash (slow on large videos).
+   */
+  verifyWorkspaceIntegrity(
+    workspacePath: string,
+    options?: VerifyOptions,
+  ): Promise<WorkspaceIntegrityReport> {
+    return safeInvoke<WorkspaceIntegrityReport>(
+      "verify_workspace_integrity",
+      { workspacePath, options: options ?? null },
+    );
+  },
+
+  /** Lists every `evidence_links` row of the active occurrence. */
+  listEvidenceLinks(workspacePath: string): Promise<EvidenceLink[]> {
+    return safeInvoke<EvidenceLink[]>("list_evidence_links", {
+      workspacePath,
+    });
+  },
+
+  /** Open the file with the OS default handler. */
+  openEvidenceFile(
+    workspacePath: string,
+    relativePath: string,
+  ): Promise<void> {
+    return safeInvoke<void>("open_evidence_file", {
+      workspacePath,
+      relativePath,
+    });
+  },
+
+  /** Reveal the file in the platform file explorer. */
+  revealEvidenceInFolder(
+    workspacePath: string,
+    relativePath: string,
+  ): Promise<void> {
+    return safeInvoke<void>("reveal_evidence_in_folder", {
+      workspacePath,
+      relativePath,
+    });
+  },
+
+  /**
+   * Run verification and persist an HTML report under `reports/`.
+   * Returns the descriptor (relative path + status snapshot).
+   */
+  generateWorkspaceIntegrityReport(
+    workspacePath: string,
+    options?: VerifyOptions,
+  ): Promise<IntegrityReportArtifact> {
+    return safeInvoke<IntegrityReportArtifact>(
+      "generate_workspace_integrity_report",
+      { workspacePath, options: options ?? null },
+    );
   },
 } as const;
 
