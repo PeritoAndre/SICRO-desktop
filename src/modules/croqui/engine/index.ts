@@ -5,3 +5,5 @@ export * from "./geometry";
 export * from "./serializer";
 export * from "./factories";
 export * from "./templates";
+export * from "./road";
+export * from "./osm";

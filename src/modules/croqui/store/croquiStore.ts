@@ -25,6 +25,15 @@ interface CroquiState {
   activeCroqui: Croqui | null;
   activeDoc: SicroCroquiDoc | null;
 
+  /**
+   * ISO timestamp of the last successful PNG export per croqui id.
+   * Used by `isExportStale(id)` to decide whether the PNG needs to be
+   * regenerated before being inserted into a Laudo. In-memory only —
+   * a page reload resets this map (the user is then conservative and
+   * re-exports on first insert, which is the safe default).
+   */
+  lastExportedAt: Record<string, string>;
+
   lastError: SicroError | null;
 
   loadList: (workspacePath: string) => Promise<void>;
@@ -40,6 +49,14 @@ interface CroquiState {
   ) => Promise<string>;
   clearCurrent: () => void;
   clearError: () => void;
+
+  /**
+   * Returns `true` when the most recent .sicrocroqui save is newer
+   * than the most recent PNG export — i.e. the rendered PNG is out of
+   * sync with what the user sees in the editor. Conservative: returns
+   * `true` when no export has happened in this session yet.
+   */
+  isExportStale: (croquiId: string) => boolean;
 }
 
 export const useCroquiStore = create<CroquiState>((set, get) => ({
@@ -49,6 +66,7 @@ export const useCroquiStore = create<CroquiState>((set, get) => ({
   activeCroquiId: null,
   activeCroqui: null,
   activeDoc: null,
+  lastExportedAt: {},
   lastError: null,
 
   async loadList(workspacePath) {
@@ -132,11 +150,17 @@ export const useCroquiStore = create<CroquiState>((set, get) => ({
       // Refresh the row so last_export_relative_path / status update in the UI.
       const list = await commands.listCroquis(workspacePath);
       const refreshed = list.find((c) => c.id === current.id) ?? current;
-      set({
+      // Record the export timestamp so `isExportStale` can later
+      // decide whether the PNG is in sync with the underlying doc.
+      set((s) => ({
         list,
         activeCroqui: refreshed,
         isMutating: false,
-      });
+        lastExportedAt: {
+          ...s.lastExportedAt,
+          [current.id]: new Date().toISOString(),
+        },
+      }));
       return path;
     } catch (err) {
       const e = toSicroError(err);
@@ -151,5 +175,15 @@ export const useCroquiStore = create<CroquiState>((set, get) => ({
 
   clearError() {
     set({ lastError: null });
+  },
+
+  isExportStale(croquiId) {
+    const s = get();
+    const exportedAt = s.lastExportedAt[croquiId];
+    if (!exportedAt) return true;
+    const croqui = s.list.find((c) => c.id === croquiId);
+    if (!croqui) return true;
+    // The .sicrocroqui has been touched more recently than the PNG.
+    return Date.parse(croqui.updated_at) > Date.parse(exportedAt);
   },
 }));

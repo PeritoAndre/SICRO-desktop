@@ -5,7 +5,7 @@
  * enabled; the others render as placeholder routes so the wiring is in place.
  */
 
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
 import {
   BookOpen,
   Boxes,
@@ -22,6 +22,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import styles from "./ActivityRail.module.css";
+import { useNavGuard } from "./navGuard";
 
 interface RailItem {
   to: string;
@@ -71,6 +72,7 @@ export function ActivityRail() {
 }
 
 function RailLink({ to, label, icon: Icon, disabled }: RailItem) {
+  const navigate = useNavigate();
   return (
     <NavLink
       to={to}
@@ -88,7 +90,16 @@ function RailLink({ to, label, icon: Icon, disabled }: RailItem) {
           .join(" ")
       }
       onClick={(e) => {
-        if (disabled) e.preventDefault();
+        if (disabled) {
+          e.preventDefault();
+          return;
+        }
+        // MVP 9 Round 3 — consult the global navigation guard so editors
+        // with unsaved work can intercept and prompt before leaving.
+        const guard = useNavGuard.getState().guard;
+        if (!guard) return;
+        e.preventDefault();
+        void useNavGuard.getState().attemptNavigation(() => navigate(to));
       }}
     >
       <Icon size={20} aria-hidden />

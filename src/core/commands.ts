@@ -36,6 +36,8 @@ import type {
 import type {
   Croqui,
   CroquiDocPayload,
+  DroneImportInput,
+  DroneImportResult,
   ExportCroquiPngInput,
   NewCroquiInput,
 } from "@domain/croqui";
@@ -351,6 +353,25 @@ export const commands = {
     return safeInvoke<string>("export_croqui_png", {
       workspacePath,
       croquiId,
+      input,
+    });
+  },
+
+  /**
+   * MVP 9 Round 4 — Drone import.
+   *
+   * Reads an aerial photo, applies radial lens correction at the chosen
+   * intensity, crops to the rectangle the user drew in the wizard,
+   * persists the derivative + sidecar inside the workspace, and returns
+   * the workspace-relative paths so the caller can drop the result as
+   * a croqui background image.
+   */
+  importDroneImage(
+    workspacePath: string,
+    input: DroneImportInput,
+  ): Promise<DroneImportResult> {
+    return safeInvoke<DroneImportResult>("import_drone_image", {
+      workspacePath,
       input,
     });
   },

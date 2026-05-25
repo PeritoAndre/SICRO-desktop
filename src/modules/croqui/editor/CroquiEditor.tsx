@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   selectActiveOccurrence,
   selectActiveWorkspacePath,
@@ -34,25 +35,37 @@ import {
   computePxPerMeter,
   distancePx,
   findTemplate,
+  fitImageToCanvas,
   formatMeasurement,
   inferCategory,
   makeLine,
   makeMarker,
   makeMeasurement,
+  makeRoad,
   makeText,
   makeVehicle,
   type LineSubtype,
   type MarkerSubtype,
+  type RoadStyle,
+  type SicroCroquiBackgroundImage,
   type SicroCroquiDoc,
   type SicroObject,
   type SicroPoint,
   type TemplateId,
   type VehicleBodyType,
 } from "../engine";
+import { useNavigate } from "react-router-dom";
+import { useNavGuard } from "@app/navGuard";
 import { Toolbar } from "./Toolbar";
 import { InspectorPanel } from "./InspectorPanel";
-import { CanvasStage, type CanvasStageHandle } from "./CanvasStage";
+import {
+  BACKGROUND_SELECTION_ID,
+  CanvasStage,
+  type CanvasStageHandle,
+} from "./CanvasStage";
 import { useEditorState, type Tool } from "./useEditorState";
+import { UnsavedChangesModal } from "./UnsavedChangesModal";
+import { DroneImportModal } from "./DroneImportModal";
 import styles from "./CroquiEditor.module.css";
 
 export function CroquiEditor() {
@@ -63,20 +76,60 @@ export function CroquiEditor() {
   const saveCurrent = useCroquiStore((s) => s.saveCurrent);
   const exportPng = useCroquiStore((s) => s.exportPng);
   const clearCurrent = useCroquiStore((s) => s.clearCurrent);
+  const isExportStale = useCroquiStore((s) => s.isExportStale);
+  const lastExportedAt = useCroquiStore((s) => s.lastExportedAt);
+
+  const navigate = useNavigate();
+  const registerNavGuard = useNavGuard((s) => s.register);
+  const unregisterNavGuard = useNavGuard((s) => s.unregister);
 
   const [doc, setDoc] = useState<SicroCroquiDoc | null>(activeDoc);
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [showPhotoPicker, setShowPhotoPicker] = useState(false);
+  const [showDroneImport, setShowDroneImport] = useState(false);
   const editor = useEditorState();
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<CanvasStageHandle | null>(null);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
 
-  // Sync the local doc with the store when the active croqui changes.
+  // MVP 9 Round 3 — dirty tracking.
+  //
+  // `lastSavedJson` is a JSON snapshot of the doc at the moment it was
+  // last saved. The doc is considered "dirty" whenever the local doc's
+  // serialized form differs from `lastSavedJson` — that's the cheapest
+  // way to detect any structural change (object added / moved / edited
+  // / removed) without instrumenting every mutation path.
+  const [lastSavedJson, setLastSavedJson] = useState<string | null>(null);
+  const dirty = useMemo(() => {
+    if (!doc || !lastSavedJson) return false;
+    return JSON.stringify(doc) !== lastSavedJson;
+  }, [doc, lastSavedJson]);
+
+  // MVP 9 Round 3 — unsaved-changes modal. When the user tries to
+  // navigate away while `dirty`, we stash the intended target here and
+  // present the modal; the user picks Save+leave, Discard, or Cancel.
+  const [pendingNav, setPendingNav] = useState<null | {
+    /** Run after the user confirms (save+leave) or discards. */
+    proceed: () => void;
+    /** Human-readable target — shown in the modal copy. */
+    label?: string;
+    /**
+     * `resolve` is set when the guard was triggered via the global nav
+     * guard (ActivityRail). Resolving it tells the guard whether to
+     * proceed or stay.
+     */
+    resolve?: (proceed: boolean) => void;
+  }>(null);
+
+  // Sync the local doc with the store when the active croqui changes
+  // — also reset `lastSavedJson` so dirty derivation starts fresh.
   useEffect(() => {
-    if (activeDoc) setDoc(activeDoc);
+    if (activeDoc) {
+      setDoc(activeDoc);
+      setLastSavedJson(JSON.stringify(activeDoc));
+    }
   }, [activeDoc]);
 
   // Resize observer for the central canvas column.
@@ -127,6 +180,14 @@ export function CroquiEditor() {
   const handleDelete = useCallback(() => {
     const id = editor.selectedId;
     if (!id) return;
+    // MVP 9 Round 5 — Del with the background selected removes it.
+    if (id === BACKGROUND_SELECTION_ID) {
+      setDoc((prev) =>
+        prev ? { ...prev, background_image: null } : prev,
+      );
+      editor.setSelectedId(null);
+      return;
+    }
     mutateObjects((objs) => objs.filter((o) => o.id !== id));
     editor.setSelectedId(null);
   }, [editor, mutateObjects]);
@@ -179,25 +240,171 @@ export function CroquiEditor() {
 
   // ----- Background image helpers -----
 
-  const setBackgroundFromPath = (sourcePath: string) => {
-    setDoc((prev) =>
-      prev
-        ? {
-            ...prev,
-            background_image: {
-              source_path: sourcePath,
-              x: 0,
-              y: 0,
-              width: 0,
-              height: 0,
-              opacity: 0.6,
-              locked: true,
-            },
-          }
-        : prev,
+  /**
+   * Resolve a workspace-relative-or-absolute background path into a URL
+   * the browser can fetch. Mirrors what `CanvasStage.resolveAssetPath`
+   * does — duplicated here to avoid leaking that helper into the editor.
+   */
+  const resolveBackgroundUrl = useCallback(
+    (sourcePath: string): string => {
+      const looksAbsolute =
+        /^([a-zA-Z]:)?[\\/]/.test(sourcePath) ||
+        sourcePath.startsWith("file://");
+      if (!looksAbsolute && workspacePath) {
+        const sep = workspacePath.includes("\\") ? "\\" : "/";
+        const abs = `${workspacePath}${sep}${sourcePath.replace(/\//g, sep)}`;
+        return convertFileSrc(abs.replace(/^file:\/\//, ""));
+      }
+      return convertFileSrc(sourcePath.replace(/^file:\/\//, ""));
+    },
+    [workspacePath],
+  );
+
+  /**
+   * Set (or replace) the croqui background. MVP 9 Round 5:
+   *   - measures the image in the browser so we know its natural size;
+   *   - fits the image into the canvas useful area (10% margin);
+   *   - centres it;
+   *   - starts the background UNLOCKED so the user can immediately drag
+   *     / resize it. The toolbar's lock toggle locks it whenever the
+   *     perito is happy with the framing.
+   *
+   * When `extra.preMeasured` is passed (drone import path), skips the
+   * browser-side measure and uses the dimensions Rust already produced.
+   */
+  const setBackgroundFromPath = useCallback(
+    (
+      sourcePath: string,
+      extra?: {
+        preMeasured?: { width: number; height: number };
+        sidecar_path?: string;
+        original_path?: string;
+        opacity?: number;
+      },
+    ) => {
+      if (!doc) return;
+      const apply = (imgW: number, imgH: number) => {
+        const rect = fitImageToCanvas(
+          imgW,
+          imgH,
+          doc.canvas.width_px,
+          doc.canvas.height_px,
+          0.1,
+        );
+        setDoc((prev) =>
+          prev
+            ? {
+                ...prev,
+                background_image: {
+                  source_path: sourcePath,
+                  x: rect.x,
+                  y: rect.y,
+                  width: rect.width,
+                  height: rect.height,
+                  opacity: extra?.opacity ?? 0.6,
+                  locked: false,
+                  rotation: 0,
+                  ...(extra?.sidecar_path
+                    ? { sidecar_path: extra.sidecar_path }
+                    : {}),
+                  ...(extra?.original_path
+                    ? { original_path: extra.original_path }
+                    : {}),
+                },
+              }
+            : prev,
+        );
+        // Auto-select the new background so the Transformer handles
+        // appear straight away — the user can drag/resize without an
+        // extra click.
+        editor.setSelectedId(BACKGROUND_SELECTION_ID);
+        setFeedback(
+          `Fundo aplicado (${Math.round(rect.width)}×${Math.round(rect.height)}px), centralizado e desbloqueado para ajuste.`,
+        );
+      };
+      if (extra?.preMeasured) {
+        apply(extra.preMeasured.width, extra.preMeasured.height);
+        return;
+      }
+      // Pre-measure via an off-screen Image so fit-to-canvas has real
+      // numbers. Fall back to canvas dimensions if measurement fails.
+      const url = resolveBackgroundUrl(sourcePath);
+      const probe = new window.Image();
+      probe.crossOrigin = "anonymous";
+      probe.src = url;
+      probe.onload = () => {
+        const w = probe.naturalWidth || doc.canvas.width_px;
+        const h = probe.naturalHeight || doc.canvas.height_px;
+        apply(w, h);
+      };
+      probe.onerror = () => {
+        // Could not pre-measure — apply with canvas-sized placeholder so
+        // the image at least gets inserted and the user can re-frame.
+        apply(doc.canvas.width_px, doc.canvas.height_px);
+      };
+    },
+    [doc, resolveBackgroundUrl],
+  );
+
+  /**
+   * Patch the current background — used by both the Konva drag/transform
+   * pipeline and the toolbar action buttons (Center, Fit, Reset…).
+   */
+  const handleBackgroundChange = useCallback(
+    (patch: Partial<SicroCroquiBackgroundImage>) => {
+      setDoc((prev) =>
+        prev && prev.background_image
+          ? {
+              ...prev,
+              background_image: { ...prev.background_image, ...patch },
+            }
+          : prev,
+      );
+    },
+    [],
+  );
+
+  /** Centre the background on the canvas, keeping its current size. */
+  const handleCenterBackground = useCallback(() => {
+    if (!doc?.background_image) return;
+    const bg = doc.background_image;
+    handleBackgroundChange({
+      x: (doc.canvas.width_px - bg.width) / 2,
+      y: (doc.canvas.height_px - bg.height) / 2,
+    });
+    setFeedback("Fundo centralizado.");
+  }, [doc, handleBackgroundChange]);
+
+  /** Re-fit the background into the canvas useful area (10% margin). */
+  const handleFitBackground = useCallback(() => {
+    if (!doc?.background_image) return;
+    const bg = doc.background_image;
+    // Use current aspect ratio (which already matches the image's), then
+    // fit into the canvas with the standard margin.
+    const rect = fitImageToCanvas(
+      bg.width || 1,
+      bg.height || 1,
+      doc.canvas.width_px,
+      doc.canvas.height_px,
+      0.1,
     );
-    setFeedback("Imagem de fundo carregada.");
-  };
+    handleBackgroundChange(rect);
+    setFeedback("Fundo ajustado à área útil.");
+  }, [doc, handleBackgroundChange]);
+
+  /** Reset the background's rotation back to 0°. */
+  const handleResetBackgroundRotation = useCallback(() => {
+    handleBackgroundChange({ rotation: 0 });
+    setFeedback("Rotação do fundo reiniciada.");
+  }, [handleBackgroundChange]);
+
+  /** Remove the background entirely. */
+  const handleRemoveBackground = useCallback(() => {
+    setDoc((prev) =>
+      prev ? { ...prev, background_image: null } : prev,
+    );
+    setFeedback("Fundo removido.");
+  }, []);
 
   const handleImportBackground = async () => {
     try {
@@ -241,9 +448,52 @@ export function CroquiEditor() {
 
   // ----- Canvas click dispatcher (after `doc` and helpers are defined) -----
 
+  // MVP 9 Road Engine Pro — finalise the current road draft (>= 2 points)
+  // and commit it to the document. Triggered by Enter, double-click, or
+  // toggling away from a road_* tool.
+  const handleFinishRoad = useCallback(() => {
+    const draft = editor.roadDraft;
+    if (!draft) return;
+    if (draft.points.length < 2) {
+      // Need at least two points to materialise an asphalt body — bail
+      // quietly so the user can keep clicking.
+      return;
+    }
+    const style = toolToRoadStyle(draft.tool);
+    if (!style) {
+      editor.setRoadDraft(null);
+      return;
+    }
+    const flat: number[] = [];
+    for (const pt of draft.points) flat.push(pt.x, pt.y);
+    const road = makeRoad(flat, style);
+    addObject(road);
+    editor.setRoadDraft(null);
+    editor.setTool("select");
+  }, [editor]);
+
+  const handleCanvasDblClick = useCallback(() => {
+    // Most pragmatic finish gesture for the road tool.
+    if (editor.roadDraft) {
+      handleFinishRoad();
+    }
+  }, [editor.roadDraft, handleFinishRoad]);
+
   const handleCanvasClick = (p: SicroPoint) => {
     if (!doc) return;
     const tool = editor.tool;
+    // Road Engine Pro multi-click: every click appends a control point to
+    // the draft. The user finishes via Enter or double-click.
+    const roadStyle = toolToRoadStyle(tool);
+    if (roadStyle) {
+      const draft = editor.roadDraft;
+      if (!draft || draft.tool !== tool) {
+        editor.setRoadDraft({ tool, points: [p] });
+      } else {
+        editor.setRoadDraft({ tool, points: [...draft.points, p] });
+      }
+      return;
+    }
     const vehicleType = toolToVehicleBody(tool);
     if (vehicleType) {
       const nextLabel = nextVehicleLabel(doc.objects);
@@ -344,8 +594,14 @@ export function CroquiEditor() {
 
       if (e.key === "Escape") {
         editor.setPending(null);
+        editor.setRoadDraft(null);
         editor.setSelectedId(null);
         editor.setTool("select");
+        return;
+      }
+      if (e.key === "Enter" && editor.roadDraft) {
+        e.preventDefault();
+        handleFinishRoad();
         return;
       }
       if ((e.key === "Delete" || e.key === "Backspace") && editor.selectedId) {
@@ -399,22 +655,67 @@ export function CroquiEditor() {
     setFeedback(`${tpl.label} inserido (${objs.length} objeto(s)).`);
   };
 
-  const handleSave = async () => {
-    if (!workspacePath || !doc) return;
+  const handleSave = async (): Promise<boolean> => {
+    if (!workspacePath || !doc) return false;
     setSaving(true);
     setFeedback(null);
     try {
       await saveCurrent(workspacePath, doc);
+      // The store stamps the doc with a new updated_at — capture the
+      // saved-snapshot JSON so dirty derivation starts fresh.
+      setLastSavedJson(JSON.stringify(doc));
       setFeedback("Croqui salvo.");
       setTimeout(() => setFeedback(null), 2500);
+      return true;
     } catch (err) {
       setFeedback(`Falha ao salvar: ${toSicroError(err).message}`);
+      return false;
     } finally {
       setSaving(false);
     }
   };
 
-  const handleExportPng = async () => {
+  // MVP 9 Round 3 — unsaved-changes guard glue.
+  //
+  // `tryNavigateAway` is the single entry point used by every UI affordance
+  // that takes the user out of the editor (Voltar button, Abrir Laudo,
+  // ActivityRail link). When the doc isn't dirty we just run the target
+  // immediately; when it is, we stash the target and show the modal so the
+  // user can decide.
+  const tryNavigateAway = useCallback(
+    (target: () => void, label?: string) => {
+      if (!dirty) {
+        target();
+        return;
+      }
+      setPendingNav({ proceed: target, label });
+    },
+    [dirty],
+  );
+
+  // Register a guard with the global nav-guard store so the ActivityRail
+  // can ask permission before taking the user to another module. The
+  // guard returns a Promise that resolves true (proceed) or false (stay)
+  // depending on what the user picks in the modal.
+  useEffect(() => {
+    if (!dirty) {
+      unregisterNavGuard();
+      return;
+    }
+    registerNavGuard(
+      () =>
+        new Promise<boolean>((resolve) => {
+          setPendingNav({
+            proceed: () => resolve(true),
+            label: "outro módulo",
+            resolve,
+          });
+        }),
+    );
+    return () => unregisterNavGuard();
+  }, [dirty, registerNavGuard, unregisterNavGuard]);
+
+  const handleExportPng = async (variant: "tecnico" | "limpo" = "tecnico") => {
     if (!workspacePath || !doc || !stageRef.current) return;
     setExporting(true);
     setFeedback(null);
@@ -422,17 +723,27 @@ export function CroquiEditor() {
       await saveCurrent(workspacePath, doc);
       const rawDataUrl = stageRef.current.toPng(2);
       if (!rawDataUrl) throw new Error("toDataURL retornou null");
-      // MVP 6: aplicar carimbo técnico antes de subir os bytes ao Rust.
-      const stamped = await stampPng(rawDataUrl, {
-        title: activeCroqui.title,
-        occurrence,
-        scaleLabel: doc.scale
-          ? `Escala 1 m = ${doc.scale.px_per_m.toFixed(2)} px`
-          : "Escala não definida",
-        timestamp: new Date(),
-      });
-      const path = await exportPng(workspacePath, stamped);
-      setFeedback(`PNG salvo em ${path}`);
+      // MVP 6 + MVP 9: dois modos de PNG.
+      //   - "tecnico" → carimbo institucional (BO, escala, timestamp);
+      //   - "limpo"   → PNG cru sem carimbo, ideal para inserir no
+      //                 corpo de um laudo onde o cabeçalho já existe.
+      const final =
+        variant === "limpo"
+          ? rawDataUrl
+          : await stampPng(rawDataUrl, {
+              title: activeCroqui.title,
+              occurrence,
+              scaleLabel: doc.scale
+                ? `Escala 1 m = ${doc.scale.px_per_m.toFixed(2)} px`
+                : "Escala não definida",
+              timestamp: new Date(),
+            });
+      const path = await exportPng(workspacePath, final);
+      setFeedback(
+        variant === "limpo"
+          ? `PNG limpo salvo em ${path}`
+          : `PNG técnico salvo em ${path}`,
+      );
     } catch (err) {
       setFeedback(`Falha ao exportar: ${toSicroError(err).message}`);
     } finally {
@@ -476,11 +787,101 @@ export function CroquiEditor() {
     return counts;
   }, [doc.objects]);
 
-  const handleBackToList = () => clearCurrent();
+  const handleBackToList = () =>
+    tryNavigateAway(() => clearCurrent(), "a lista de croquis");
+
+  // MVP 9 Round 3 — `ensureCroquiExportFresh`:
+  //
+  //   - if the croqui is dirty → save it first;
+  //   - if there's no recorded export or the export is older than the
+  //     doc (`isExportStale`), generate a fresh PNG (technical variant);
+  //   - return true on success, false on failure.
+  //
+  // The Laudo flow ("Abrir Laudo") calls this before navigating so the
+  // panel on the other side always sees the most recent PNG. Avoids the
+  // "salvei o croqui mas o laudo ainda mostra o PNG antigo" bug the
+  // user reported.
+  const ensureExportFresh = useCallback(async (): Promise<boolean> => {
+    if (!workspacePath || !doc || !activeCroqui || !stageRef.current) {
+      return false;
+    }
+    // Step 1 — flush dirty state.
+    if (dirty) {
+      const ok = await handleSave();
+      if (!ok) return false;
+    }
+    // Step 2 — re-export only when the recorded PNG is older than the
+    // last save (or doesn't exist at all).
+    if (!isExportStale(activeCroqui.id) && activeCroqui.last_export_relative_path) {
+      return true;
+    }
+    setExporting(true);
+    try {
+      const rawDataUrl = stageRef.current.toPng(2);
+      if (!rawDataUrl) throw new Error("toDataURL retornou null");
+      const final = await stampPng(rawDataUrl, {
+        title: activeCroqui.title,
+        occurrence,
+        scaleLabel: doc.scale
+          ? `Escala 1 m = ${doc.scale.px_per_m.toFixed(2)} px`
+          : "Escala não definida",
+        timestamp: new Date(),
+      });
+      await exportPng(workspacePath, final);
+      return true;
+    } catch (err) {
+      setFeedback(
+        `Falha ao gerar PNG atualizado: ${toSicroError(err).message}`,
+      );
+      return false;
+    } finally {
+      setExporting(false);
+    }
+  }, [
+    workspacePath,
+    doc,
+    activeCroqui,
+    occurrence,
+    dirty,
+    isExportStale,
+    handleSave,
+    exportPng,
+  ]);
+
   const handleInsertInLaudo = () => {
-    // Navegação para o Laudo via window hash router — o painel
-    // de evidências do Laudo já enxerga o PNG mais recente.
-    window.location.hash = "#/laudo";
+    // Run the freshness pipeline first; only navigate if it succeeded
+    // so the Laudo always sees a PNG matching the current .sicrocroqui.
+    void (async () => {
+      const ok = await ensureExportFresh();
+      if (!ok) return;
+      navigate("/laudo");
+    })();
+  };
+
+  // Modal handlers ---------------------------------------------------------
+  const handleModalSaveAndLeave = async () => {
+    if (!pendingNav) return;
+    const ok = await handleSave();
+    if (!ok) return; // stay on the editor so the user can retry
+    const { proceed, resolve } = pendingNav;
+    setPendingNav(null);
+    proceed();
+    resolve?.(true);
+  };
+
+  const handleModalDiscardAndLeave = () => {
+    if (!pendingNav) return;
+    const { proceed, resolve } = pendingNav;
+    setPendingNav(null);
+    proceed();
+    resolve?.(true);
+  };
+
+  const handleModalCancel = () => {
+    if (!pendingNav) return;
+    const { resolve } = pendingNav;
+    setPendingNav(null);
+    resolve?.(false);
   };
 
   return (
@@ -498,6 +899,11 @@ export function CroquiEditor() {
         onDuplicate={handleDuplicate}
         onImportBackground={() => void handleImportBackground()}
         onPickFromDossie={() => setShowPhotoPicker(true)}
+        onImportDrone={() => setShowDroneImport(true)}
+        onCenterBackground={handleCenterBackground}
+        onFitBackground={handleFitBackground}
+        onResetBackgroundRotation={handleResetBackgroundRotation}
+        onRemoveBackground={handleRemoveBackground}
         hasBackground={!!doc.background_image}
         bgLocked={doc.background_image?.locked ?? true}
         onToggleBackgroundLock={handleToggleBackgroundLock}
@@ -506,7 +912,8 @@ export function CroquiEditor() {
         onInsertTemplate={handleInsertTemplate}
         onInsertInLaudo={handleInsertInLaudo}
         onSave={() => void handleSave()}
-        onExportPng={() => void handleExportPng()}
+        onExportPng={() => void handleExportPng("tecnico")}
+        onExportPngClean={() => void handleExportPng("limpo")}
         onBackToList={handleBackToList}
         saving={saving}
         exporting={exporting}
@@ -519,7 +926,9 @@ export function CroquiEditor() {
           containerWidth={canvasSize.width}
           containerHeight={canvasSize.height}
           onCanvasClick={handleCanvasClick}
+          onCanvasDblClick={handleCanvasDblClick}
           onObjectChange={handleObjectChange}
+          onBackgroundChange={handleBackgroundChange}
           onSelect={(id) => editor.setSelectedId(id)}
           workspacePath={workspacePath}
         />
@@ -531,6 +940,15 @@ export function CroquiEditor() {
           objectCount={doc.objects.length}
           totalsByCategory={totalsByCategory}
           saving={saving}
+          exporting={exporting}
+          dirty={dirty}
+          exportStale={
+            activeCroqui ? isExportStale(activeCroqui.id) : true
+          }
+          hasAnyExport={
+            (activeCroqui?.last_export_relative_path != null) ||
+            (activeCroqui ? Boolean(lastExportedAt[activeCroqui.id]) : false)
+          }
           feedback={feedback}
           croquiTitle={activeCroqui.title}
         />
@@ -560,6 +978,48 @@ export function CroquiEditor() {
           onClose={() => setShowPhotoPicker(false)}
         />
       )}
+
+      {showDroneImport && (
+        <DroneImportModal
+          workspacePath={workspacePath}
+          croquiId={activeCroqui.id}
+          occurrenceId={activeCroqui.occurrence_id}
+          onConfirm={(result) => {
+            // The corrected + cropped PNG becomes the croqui background.
+            // We pass the Rust-side dimensions as `preMeasured` so
+            // `setBackgroundFromPath` skips the off-screen probe and
+            // fits the image into the canvas useful area immediately.
+            // The sidecar path is carried into `background_image` so
+            // the chain of custody (lens correction + crop parameters)
+            // stays attached to the doc.
+            setBackgroundFromPath(result.output_relative_path, {
+              preMeasured: {
+                width: result.output_width,
+                height: result.output_height,
+              },
+              sidecar_path: result.sidecar_relative_path,
+            });
+            setShowDroneImport(false);
+            setFeedback(
+              `Drone: imagem corrigida (${result.output_width}×${result.output_height}px) ` +
+                `centralizada e dimensionada para a área útil. Ajuste a posição/tamanho ` +
+                `arrastando a imagem — depois bloqueie e defina a escala.`,
+            );
+          }}
+          onCancel={() => setShowDroneImport(false)}
+        />
+      )}
+
+      {pendingNav && (
+        <UnsavedChangesModal
+          saving={saving}
+          exporting={exporting}
+          destinationLabel={pendingNav.label}
+          onSaveAndLeave={() => void handleModalSaveAndLeave()}
+          onDiscardAndLeave={handleModalDiscardAndLeave}
+          onCancel={handleModalCancel}
+        />
+      )}
     </div>
   );
 }
@@ -584,6 +1044,21 @@ function toolToVehicleBody(tool: Tool): VehicleBodyType | null {
       return "moto";
     case "vehicle_bike":
       return "bike";
+    // MVP 9
+    case "vehicle_pickup":
+      return "pickup";
+    case "vehicle_van":
+      return "van";
+    case "vehicle_onibus":
+      return "onibus";
+    case "vehicle_moto_esportiva":
+      return "moto_esportiva";
+    case "vehicle_moto_carga":
+      return "moto_carga";
+    case "vehicle_caminhao_pesado":
+      return "caminhao_pesado";
+    case "vehicle_carreta":
+      return "carreta";
     default:
       return null;
   }
@@ -607,6 +1082,49 @@ function toolToMarkerSubtype(tool: Tool): MarkerSubtype | null {
       return "pedestrian";
     case "marker_body":
       return "body";
+    // MVP 9 — vestígios extras
+    case "marker_skid_curve":
+      return "skid_curve";
+    case "marker_sulcagem":
+      return "sulcagem";
+    case "marker_ranhura":
+      return "ranhura";
+    case "marker_impact_area":
+      return "impact_area";
+    case "marker_rest_position":
+      return "rest_position";
+    // MVP 9 — mobiliário urbano
+    case "marker_semaforo":
+      return "semaforo";
+    case "marker_placa_pare":
+      return "placa_pare";
+    case "marker_placa_preferencia":
+      return "placa_preferencia";
+    case "marker_poste":
+      return "poste";
+    case "marker_arvore":
+      return "arvore";
+    case "marker_guia":
+      return "guia";
+    case "marker_faixa_pedestre":
+      return "faixa_pedestre";
+    default:
+      return null;
+  }
+}
+
+function toolToRoadStyle(tool: Tool): RoadStyle | null {
+  switch (tool) {
+    case "road_urban":
+      return "urban";
+    case "road_avenue":
+      return "avenue";
+    case "road_highway":
+      return "highway";
+    case "road_dirt":
+      return "dirt";
+    case "road_parking":
+      return "parking";
     default:
       return null;
   }
@@ -628,6 +1146,15 @@ function toolToLineSubtype(tool: Tool): LineSubtype | null {
       return "sidewalk";
     case "line_arrow":
       return "arrow";
+    // MVP 9
+    case "line_canteiro":
+      return "canteiro";
+    case "line_acostamento":
+      return "acostamento";
+    case "line_trajetoria":
+      return "trajetoria";
+    case "line_callout":
+      return "callout";
     default:
       return null;
   }
@@ -658,6 +1185,10 @@ function StatusBar({
   objectCount,
   totalsByCategory,
   saving,
+  exporting,
+  dirty,
+  exportStale,
+  hasAnyExport,
   feedback,
   croquiTitle,
 }: {
@@ -668,9 +1199,39 @@ function StatusBar({
   objectCount: number;
   totalsByCategory: Record<string, number>;
   saving: boolean;
+  exporting: boolean;
+  dirty: boolean;
+  exportStale: boolean;
+  hasAnyExport: boolean;
   feedback: string | null;
   croquiTitle: string;
 }) {
+  // MVP 9 Round 3 — show two new chips so the perito knows at a glance
+  // whether their work is safe.
+  const saveLabel = saving
+    ? "salvando…"
+    : dirty
+      ? "alterações não salvas"
+      : "salvo";
+  const saveColor = saving
+    ? "#f59e0b"
+    : dirty
+      ? "#dc2626"
+      : "#16a34a";
+
+  const exportLabel = exporting
+    ? "exportando…"
+    : !hasAnyExport
+      ? "sem exportação"
+      : exportStale
+        ? "exportação desatualizada"
+        : "exportação atualizada";
+  const exportColor = exporting
+    ? "#f59e0b"
+    : exportStale || !hasAnyExport
+      ? "#dc2626"
+      : "#16a34a";
+
   return (
     <div className={styles.statusBar}>
       <span className={styles.statusTitle}>{croquiTitle}</span>
@@ -695,9 +1256,13 @@ function StatusBar({
           </span>
         )}
       </span>
-      <span className={styles.statusFeedback}>
-        {saving ? "salvando…" : feedback}
+      <span style={{ color: saveColor, fontWeight: 600 }}>
+        ● {saveLabel}
       </span>
+      <span style={{ color: exportColor, fontWeight: 600 }}>
+        ● {exportLabel}
+      </span>
+      <span className={styles.statusFeedback}>{feedback}</span>
     </div>
   );
 }
