@@ -37,6 +37,16 @@ export interface Occurrence {
   status: OccurrenceStatus;
   created_at: string;
   updated_at: string;
+
+  // ---- Spike D fields (only populated when the occurrence came from a
+  //      .sicroapp import; null for hand-created Spike A occurrences). ----
+  import_id?: string | null;
+  original_mobile_id?: string | null;
+  primary_accuracy_m?: number | null;
+  resultado?: string | null;
+  raw_case_json?: string | null;
+  raw_metadata_json?: string | null;
+  raw_location_json?: string | null;
 }
 
 /** Payload used when creating a new occurrence. */

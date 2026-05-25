@@ -124,6 +124,14 @@ pub fn create_workspace(
         status: OccurrenceStatus::Aberta,
         created_at: now,
         updated_at: now,
+        // Spike A occurrence — not imported from a .sicroapp.
+        import_id: None,
+        original_mobile_id: None,
+        primary_accuracy_m: None,
+        resultado: None,
+        raw_case_json: None,
+        raw_metadata_json: None,
+        raw_location_json: None,
     };
     occurrence_repo::insert(&conn, &occurrence)?;
 

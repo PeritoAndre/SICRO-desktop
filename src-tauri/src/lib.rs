@@ -10,6 +10,7 @@ pub mod error;
 pub mod exporters;
 pub mod filesystem;
 pub mod hashing;
+pub mod importer;
 pub mod models;
 pub mod state;
 pub mod workspace;
@@ -51,6 +52,11 @@ pub fn run() {
             commands::export_commands::export_laudo_pdf,
             commands::export_commands::export_laudo_docx,
             commands::export_commands::list_laudo_exports,
+            // importer (Spike D — .sicroapp)
+            commands::import_commands::import_sicroapp,
+            commands::import_commands::list_workspace_imports,
+            commands::import_commands::read_import_report,
+            commands::import_commands::list_workspace_photos,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SICRO Desktop");

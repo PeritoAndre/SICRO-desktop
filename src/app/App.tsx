@@ -3,6 +3,7 @@ import { AppShell } from "./AppShell";
 import { WorkspaceProvider } from "./WorkspaceProvider";
 import { HomeView } from "@modules/home/HomeView";
 import { LaudoModule } from "@modules/laudo/LaudoModule";
+import { DossieModule } from "@modules/dossie/DossieModule";
 import { PlaceholderModule } from "@modules/placeholders/PlaceholderModule";
 
 export function App() {
@@ -12,15 +13,7 @@ export function App() {
         <AppShell>
           <Routes>
             <Route path="/" element={<HomeView />} />
-            <Route
-              path="/dossie"
-              element={
-                <PlaceholderModule
-                  module="Dossiê"
-                  scheduled="MVP 3 (após Spike D — Importador .sicroapp)"
-                />
-              }
-            />
+            <Route path="/dossie" element={<DossieModule />} />
             <Route path="/laudo" element={<LaudoModule />} />
             <Route
               path="/croqui"

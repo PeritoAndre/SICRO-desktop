@@ -15,7 +15,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# `protocol-asset` allows the WebView to fetch files via `convertFileSrc` —
+# needed by the Spike D photo gallery to render imported photos without
+# round-tripping bytes through `invoke`.
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2"
 
 serde = { version = "1", features = ["derive"] }
@@ -38,10 +41,15 @@ directories = "5"
 # DOCX export (Spike C). Pure-Rust crate — no system dependencies.
 docx-rs = "0.4"
 
-[dev-dependencies]
-# Integration tests for the DOCX exporter unzip the artefact and read
-# `word/document.xml` to verify the walker emitted every text leaf.
+# Spike D — .sicroapp importer.
+#   `zip`  reads the ZIP-wrapped pacote (`.sicroapp` is a ZIP renamed).
+#   `sha2` powers the streaming SHA-256 used both for the package integrity
+#         check (`hashes.json`) and for the per-file content hash recorded
+#         in `media_assets`.
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
+sha2 = "0.10"
+
+[dev-dependencies]
 tempfile = "3"
 
 [features]

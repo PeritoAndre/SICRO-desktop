@@ -4,10 +4,15 @@
 //! in snake_case — serde defaults match the TypeScript wire format.
 
 pub mod export;
+pub mod import;
 pub mod laudo;
 pub mod occurrence;
 
 pub use export::{Export, ExportKind};
+pub use import::{
+    EvidenceItem, HashMismatch, Import, ImportReport, ImportResult, ImportSicroappInput,
+    ImportStatus, MediaAsset, MediaAssetType,
+};
 pub use laudo::{Laudo, LaudoDoc, LaudoStatus, NewLaudoInput};
 pub use occurrence::{
     LoadedOccurrence, NewOccurrenceInput, Occurrence, OccurrenceStatus, RecentOccurrence,

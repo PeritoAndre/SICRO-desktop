@@ -8,5 +8,6 @@
 //! `commands::<module>::<name>`.
 
 pub mod export_commands;
+pub mod import_commands;
 pub mod laudo_commands;
 pub mod workspace_commands;
