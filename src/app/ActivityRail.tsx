@@ -8,6 +8,7 @@
 import { NavLink } from "react-router-dom";
 import {
   BookOpen,
+  Boxes,
   Camera,
   ClipboardList,
   FileText,
@@ -35,6 +36,7 @@ const items: RailItem[] = [
   { to: "/laudo", label: "Laudo", icon: FileText },
   { to: "/croqui", label: "Croqui", icon: Shapes },
   { to: "/video", label: "Vídeo", icon: Film },
+  { to: "/evidencias", label: "Evidências", icon: Boxes },
   { to: "/imagens", label: "Imagens", icon: Camera, disabled: true },
   { to: "/midias", label: "Mídias", icon: ClipboardList, disabled: true },
   { to: "/estatisticas", label: "Estatísticas", icon: PieChart, disabled: true },

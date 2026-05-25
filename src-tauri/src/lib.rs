@@ -12,6 +12,7 @@ pub mod filesystem;
 pub mod hashing;
 pub mod importer;
 pub mod models;
+pub mod registry;
 pub mod state;
 pub mod video;
 pub mod workspace;
@@ -90,6 +91,14 @@ pub fn run() {
             commands::evidence_commands::record_evidence_link,
             commands::evidence_commands::list_evidence_links_for_laudo,
             commands::evidence_commands::read_evidence_asset,
+            // central de evidências + integridade (MVP 5)
+            commands::registry_commands::list_evidence_registry_items,
+            commands::registry_commands::get_evidence_registry_summary,
+            commands::registry_commands::verify_workspace_integrity,
+            commands::registry_commands::list_evidence_links,
+            commands::registry_commands::open_evidence_file,
+            commands::registry_commands::reveal_evidence_in_folder,
+            commands::registry_commands::generate_workspace_integrity_report,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SICRO Desktop");

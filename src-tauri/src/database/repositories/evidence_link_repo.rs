@@ -61,6 +61,23 @@ pub fn list_for_target(
     Ok(rows)
 }
 
+/// List every evidence link of a given occurrence — used by the
+/// Central de Evidências to count how many laudos cite each item.
+pub fn list_for_occurrence(
+    conn: &Connection,
+    occurrence_id: &Uuid,
+) -> Result<Vec<EvidenceLink>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM evidence_links
+         WHERE occurrence_id = ?1
+         ORDER BY created_at DESC"
+    ))?;
+    let rows = stmt
+        .query_map([occurrence_id.to_string()], row_to_link)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 fn row_to_link(row: &Row<'_>) -> rusqlite::Result<EvidenceLink> {
     let id: String = row.get("id")?;
     let id = Uuid::parse_str(&id).map_err(|e| {

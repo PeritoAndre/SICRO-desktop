@@ -10,6 +10,7 @@ pub mod export;
 pub mod import;
 pub mod laudo;
 pub mod occurrence;
+pub mod registry;
 pub mod video;
 
 pub use croqui::{Croqui, CroquiDoc, CroquiStatus, ExportCroquiPngInput, NewCroquiInput};
@@ -26,6 +27,10 @@ pub use import::{
     ImportStatus, MediaAsset, MediaAssetType,
 };
 pub use laudo::{Laudo, LaudoDoc, LaudoStatus, NewLaudoInput};
+pub use registry::{
+    BrokenLaudoLink, EvidenceKind, EvidenceRegistryItem, IntegrityReportArtifact,
+    IntegrityStatus, RegistrySummary, VerifyOptions, WorkspaceIntegrityReport,
+};
 pub use occurrence::{
     LoadedOccurrence, NewOccurrenceInput, Occurrence, OccurrenceStatus, RecentOccurrence,
 };

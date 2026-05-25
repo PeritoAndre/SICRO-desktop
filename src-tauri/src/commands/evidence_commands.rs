@@ -17,6 +17,7 @@ use crate::database::connection::open_connection;
 use crate::database::migrations::run_migrations;
 use crate::database::repositories::{evidence_link_repo, occurrence_repo};
 use crate::error::{Result, SicroError};
+use crate::filesystem::sanitize_relative_path as shared_sanitize_relative_path;
 use crate::models::{EvidenceAsset, EvidenceLink, RecordEvidenceLinkInput};
 use crate::workspace::manifest::{Manifest, SQLITE_FILENAME};
 
@@ -85,7 +86,7 @@ pub async fn read_evidence_asset(
 ) -> Result<EvidenceAsset> {
     let ws = PathBuf::from(&workspace_path);
     let _ = Manifest::read(&ws)?;
-    let safe = sanitize_relative_path(&relative_path)?;
+    let safe = shared_sanitize_relative_path(&relative_path)?;
     let abs = ws.join(&safe);
     if !abs.is_file() {
         return Err(SicroError::Filesystem(format!(
@@ -106,37 +107,6 @@ pub async fn read_evidence_asset(
         base64,
         size_bytes,
     })
-}
-
-fn sanitize_relative_path(raw: &str) -> Result<PathBuf> {
-    if raw.is_empty() {
-        return Err(SicroError::Validation("empty relative path".into()));
-    }
-    if raw.starts_with('/') || raw.starts_with('\\') {
-        return Err(SicroError::Validation(format!(
-            "absolute path rejected: {raw:?}"
-        )));
-    }
-    if let Some(c) = raw.chars().next() {
-        if c.is_alphabetic() && raw[1..].starts_with(":") {
-            return Err(SicroError::Validation(format!(
-                "drive-anchored path rejected: {raw:?}"
-            )));
-        }
-    }
-    let mut out = PathBuf::new();
-    for part in raw.split(['/', '\\']) {
-        if part.is_empty() || part == "." {
-            continue;
-        }
-        if part == ".." {
-            return Err(SicroError::Validation(format!(
-                "path traversal rejected: {raw:?}"
-            )));
-        }
-        out.push(part);
-    }
-    Ok(out)
 }
 
 fn guess_mime(p: &Path) -> Option<String> {

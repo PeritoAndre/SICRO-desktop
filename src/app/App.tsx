@@ -6,6 +6,7 @@ import { LaudoModule } from "@modules/laudo/LaudoModule";
 import { DossieModule } from "@modules/dossie/DossieModule";
 import { CroquiModule } from "@modules/croqui/CroquiModule";
 import { VideoModule } from "@modules/video/VideoModule";
+import { EvidenciasModule } from "@modules/evidencias/EvidenciasModule";
 import { PlaceholderModule } from "@modules/placeholders/PlaceholderModule";
 
 export function App() {
@@ -19,6 +20,7 @@ export function App() {
             <Route path="/laudo" element={<LaudoModule />} />
             <Route path="/croqui" element={<CroquiModule />} />
             <Route path="/video" element={<VideoModule />} />
+            <Route path="/evidencias" element={<EvidenciasModule />} />
             <Route
               path="/imagens"
               element={

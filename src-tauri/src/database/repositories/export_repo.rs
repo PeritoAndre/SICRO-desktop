@@ -42,6 +42,21 @@ pub fn list_by_laudo(conn: &Connection, laudo_id: &Uuid) -> Result<Vec<Export>> 
     Ok(rows)
 }
 
+pub fn list_by_occurrence(
+    conn: &Connection,
+    occurrence_id: &Uuid,
+) -> Result<Vec<Export>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM exports
+         WHERE occurrence_id = ?1
+         ORDER BY created_at DESC"
+    ))?;
+    let rows = stmt
+        .query_map([occurrence_id.to_string()], row_to_export)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
 fn row_to_export(row: &Row<'_>) -> rusqlite::Result<Export> {
     let id = parse_uuid(row, "id")?;
     let occurrence_id = parse_uuid(row, "occurrence_id")?;
