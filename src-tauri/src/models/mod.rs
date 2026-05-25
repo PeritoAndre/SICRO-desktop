@@ -3,11 +3,16 @@
 //! These structs mirror `src/types/*.ts` on the front-end. Keep field names
 //! in snake_case — serde defaults match the TypeScript wire format.
 
+pub mod dossie;
 pub mod export;
 pub mod import;
 pub mod laudo;
 pub mod occurrence;
 
+pub use dossie::{
+    ChecklistItem, ChecklistSummary, DossieCounts, DossieSummary, Entity, FieldNote, Measurement,
+    OccurrenceStats, RehydrateOutcome, TimelineEvent, Trace,
+};
 pub use export::{Export, ExportKind};
 pub use import::{
     EvidenceItem, HashMismatch, Import, ImportReport, ImportResult, ImportSicroappInput,

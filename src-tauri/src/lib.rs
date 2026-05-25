@@ -57,6 +57,17 @@ pub fn run() {
             commands::import_commands::list_workspace_imports,
             commands::import_commands::read_import_report,
             commands::import_commands::list_workspace_photos,
+            // dossiê operacional (MVP 3)
+            commands::dossie_commands::get_dossie_summary,
+            commands::dossie_commands::list_dossie_photos,
+            commands::dossie_commands::list_dossie_checklist,
+            commands::dossie_commands::list_dossie_entities,
+            commands::dossie_commands::list_dossie_traces,
+            commands::dossie_commands::list_dossie_measurements,
+            commands::dossie_commands::list_dossie_notes,
+            commands::dossie_commands::list_dossie_timeline,
+            commands::dossie_commands::get_dossie_stats,
+            commands::dossie_commands::rehydrate_dossie,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SICRO Desktop");
