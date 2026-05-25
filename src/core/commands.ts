@@ -52,6 +52,11 @@ import type {
   VideoOperationLog,
   VideoStoryboardFrame,
 } from "@domain/video";
+import type {
+  EvidenceAsset,
+  EvidenceLink,
+  RecordEvidenceLinkInput,
+} from "@domain/evidence";
 import { toSicroError, type SicroError } from "./errors";
 
 async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -431,6 +436,48 @@ export const commands = {
       workspacePath,
       mediaHash,
       limit,
+    });
+  },
+
+  // ----- Evidência → Laudo (MVP 4) -----
+
+  /**
+   * Grava uma linha em `evidence_links` quando o perito insere uma
+   * evidência no laudo. Os atributos completos continuam nos próprios
+   * nodes do `.sicrodoc`; esta tabela é índice / audit log.
+   */
+  recordEvidenceLink(
+    workspacePath: string,
+    input: RecordEvidenceLinkInput,
+  ): Promise<EvidenceLink> {
+    return safeInvoke<EvidenceLink>("record_evidence_link", {
+      workspacePath,
+      input,
+    });
+  },
+
+  listEvidenceLinksForLaudo(
+    workspacePath: string,
+    laudoId: string,
+  ): Promise<EvidenceLink[]> {
+    return safeInvoke<EvidenceLink[]>("list_evidence_links_for_laudo", {
+      workspacePath,
+      laudoId,
+    });
+  },
+
+  /**
+   * Lê bytes de um asset de evidência e retorna base64. Usado pelo
+   * renderer para inlinear data URIs no HTML/PDF (não funciona com
+   * convertFileSrc dentro de iframe srcdoc / headless Edge).
+   */
+  readEvidenceAsset(
+    workspacePath: string,
+    relativePath: string,
+  ): Promise<EvidenceAsset> {
+    return safeInvoke<EvidenceAsset>("read_evidence_asset", {
+      workspacePath,
+      relativePath,
     });
   },
 } as const;

@@ -9,9 +9,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { Copy, Eye, X } from "lucide-react";
 import {
+  collectEvidencePaths,
   loadBrandingAssets,
+  loadEvidenceAssets,
+  normalizeEvidenceSrcsForSave,
   renderSicroDocToHtml,
   type BrandingAssets,
+  type EvidenceAssetMap,
   type SicroDoc,
 } from "../document-engine";
 import type { Occurrence } from "@domain/occurrence";
@@ -22,6 +26,8 @@ interface HtmlPreviewProps {
   liveContent: SicroDoc["content"] | null;
   /** Optional — feeds the institutional header (MVP 2). */
   occurrence?: Occurrence | null;
+  /** Required for MVP 4 — used to fetch evidence bytes for inlining. */
+  workspacePath: string | null;
   onClose: () => void;
 }
 
@@ -29,9 +35,13 @@ export function HtmlPreview({
   doc,
   liveContent,
   occurrence,
+  workspacePath,
   onClose,
 }: HtmlPreviewProps) {
   const [branding, setBranding] = useState<BrandingAssets | null>(null);
+  const [evidenceAssets, setEvidenceAssets] = useState<EvidenceAssetMap | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -43,17 +53,49 @@ export function HtmlPreview({
     };
   }, []);
 
+  // Pre-load evidence assets whenever the doc/liveContent changes. The
+  // renderer expects `relative_path` references but the WebView's iframe
+  // srcdoc can't reach `tauri://localhost/...` URLs, so we inline
+  // everything as data URIs.
+  useEffect(() => {
+    if (!doc || !workspacePath) {
+      setEvidenceAssets(null);
+      return;
+    }
+    let cancelled = false;
+    const portable = normalizeEvidenceSrcsForSave(liveContent ?? doc.content);
+    const paths = collectEvidencePaths(portable);
+    if (paths.size === 0) {
+      setEvidenceAssets({ byRelativePath: {} });
+      return;
+    }
+    void loadEvidenceAssets(workspacePath, paths).then((assets) => {
+      if (!cancelled) setEvidenceAssets(assets);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc, liveContent, workspacePath]);
+
   const html = useMemo(() => {
     if (!doc) return "";
-    const docWithLiveContent: SicroDoc = liveContent
-      ? { ...doc, content: liveContent }
-      : doc;
+    // Strip any in-memory convertFileSrc URLs back to relative paths so
+    // the renderer's `inlineEvidenceAssets` step can match them against
+    // the loaded asset map.
+    const portableContent = normalizeEvidenceSrcsForSave(
+      liveContent ?? doc.content,
+    );
+    const docWithLiveContent: SicroDoc = {
+      ...doc,
+      content: portableContent,
+    };
     return renderSicroDocToHtml(docWithLiveContent, {
       fullDocument: true,
       occurrence: (occurrence as unknown as Record<string, unknown>) ?? null,
       branding,
+      evidenceAssets,
     });
-  }, [doc, liveContent, occurrence, branding]);
+  }, [doc, liveContent, occurrence, branding, evidenceAssets]);
 
   const copy = async () => {
     try {

@@ -9,6 +9,7 @@
 
 pub mod croqui_commands;
 pub mod dossie_commands;
+pub mod evidence_commands;
 pub mod export_commands;
 pub mod import_commands;
 pub mod laudo_commands;

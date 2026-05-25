@@ -47,15 +47,31 @@ export {
   type BrandingAssets,
 } from "./branding";
 export {
+  collectEvidencePaths,
+  inlineEvidenceAssets,
+  loadEvidenceAssets,
+  type EvidenceAssetMap,
+} from "./evidence-assets";
+export {
+  resolveEvidenceSrcsForEditor,
+  normalizeEvidenceSrcsForSave,
+} from "./relative-src";
+export {
   Figure,
   FigCaption,
   Storyboard,
   StoryboardItem,
   SystemData,
+  EvidenceTable,
   QuesitoList,
   QuesitoItem,
   QuesitoQuestion,
   QuesitoAnswer,
   Signature,
+  type FigureKind,
+  type StoryboardEvidenceItem,
   type SystemDataReviewStatus,
+  type EvidenceTableKind,
+  type EvidenceTableColumn,
+  type EvidenceTableRow,
 } from "./nodes";

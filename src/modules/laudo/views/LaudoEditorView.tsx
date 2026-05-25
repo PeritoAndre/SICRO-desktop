@@ -177,11 +177,17 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
               doc={docForInspector}
               liveContent={liveContent}
               occurrence={activeOccurrence}
+              workspacePath={workspacePath}
               onClose={() => setPreviewOpen(false)}
             />
           )}
         </div>
-        <Inspector doc={docForInspector} />
+        <Inspector
+          doc={docForInspector}
+          editor={editor}
+          workspacePath={workspacePath}
+          laudoId={currentLaudo.id}
+        />
       </div>
     </div>
   );

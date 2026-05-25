@@ -16,7 +16,10 @@ import {
 import { commands } from "@core/commands";
 import { toSicroError } from "@core/errors";
 import {
+  collectEvidencePaths,
   loadBrandingAssets,
+  loadEvidenceAssets,
+  normalizeEvidenceSrcsForSave,
   renderSicroDocToHtml,
   type SicroDoc,
 } from "../document-engine";
@@ -89,11 +92,25 @@ export function ExportMenu({
         // headless print-to-pdf step (which reads the HTML from a temp file)
         // can show the coats of arms without resolving /branding/ paths.
         const branding = await loadBrandingAssets();
-        const html = renderSicroDocToHtml(doc, {
-          fullDocument: true,
-          occurrence: occurrence ?? null,
-          branding,
-        });
+        // MVP 4: collect every figure/storyboard `relative_path` and
+        // load its bytes through the Rust backend, then hand them to the
+        // renderer for data-URI inlining. Without this the headless
+        // PDF/HTML target can't read evidence files via tauri://.
+        const portableContent = normalizeEvidenceSrcsForSave(doc.content);
+        const evidencePaths = collectEvidencePaths(portableContent);
+        const evidenceAssets =
+          evidencePaths.size > 0
+            ? await loadEvidenceAssets(workspacePath, evidencePaths)
+            : null;
+        const html = renderSicroDocToHtml(
+          { ...doc, content: portableContent },
+          {
+            fullDocument: true,
+            occurrence: occurrence ?? null,
+            branding,
+            evidenceAssets,
+          },
+        );
         result =
           target === "pdf"
             ? await commands.exportLaudoPdf(workspacePath, laudoId, html)

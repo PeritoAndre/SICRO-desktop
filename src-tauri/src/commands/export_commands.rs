@@ -137,7 +137,10 @@ pub async fn export_laudo_docx(
     let envelope: serde_json::Value = serde_json::from_slice(&bytes)?;
 
     let target = export_paths::resolve_export_target(&ws, &id, ExportKind::Docx)?;
-    docx_export::render_doc_to_docx(&envelope, &target.absolute_path)?;
+    // Hand the workspace root to the walker so figure/storyboard nodes with
+    // `relative_path` get their PNG/JPG bytes embedded as real images. The
+    // walker degrades to a placeholder paragraph if a file is missing.
+    docx_export::render_doc_to_docx(&envelope, &target.absolute_path, Some(&ws))?;
 
     let file_size = std::fs::metadata(&target.absolute_path)
         .map(|m| m.len() as i64)

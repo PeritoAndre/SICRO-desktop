@@ -23,6 +23,10 @@ import { laudoExtensions } from "./extensions";
 import type { SicroDoc, SicroDocPageMargins } from "./schema";
 import { numberFigures } from "./numbering";
 import {
+  inlineEvidenceAssets,
+  type EvidenceAssetMap,
+} from "./evidence-assets";
+import {
   findInstitutionalTemplate,
   resolveHeaderField,
   type InstitutionalTemplate,
@@ -261,6 +265,10 @@ export interface RenderOptions {
    *  cannot resolve `/branding/...` paths). Optional — without it the
    *  header renders without images. */
   branding?: BrandingAssets | null;
+  /** MVP 4: pre-loaded evidence asset bytes (relative_path → data URI).
+   *  When provided, figures/storyboard items whose `relative_path` matches
+   *  have their `src` replaced before TipTap renders. */
+  evidenceAssets?: EvidenceAssetMap | null;
 }
 
 export function renderSicroDocToHtml(
@@ -270,9 +278,14 @@ export function renderSicroDocToHtml(
   const numbering = options.numbering ?? true;
   const fullDocument = options.fullDocument ?? false;
 
-  const content = numbering
+  let content: JSONContent = numbering
     ? numberFigures(doc.content)
     : (doc.content as JSONContent);
+  if (options.evidenceAssets) {
+    // Inline data URIs so the HTML/PDF pipeline doesn't need
+    // workspace-local file access.
+    content = inlineEvidenceAssets(content, options.evidenceAssets);
+  }
   const innerHtml = generateHTML(content, laudoExtensions());
 
   if (!fullDocument) {

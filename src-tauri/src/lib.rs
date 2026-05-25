@@ -86,6 +86,10 @@ pub fn run() {
             commands::video_commands::update_storyboard_frame,
             commands::video_commands::delete_storyboard_frame,
             commands::video_commands::list_video_operation_logs,
+            // evidência → laudo (MVP 4)
+            commands::evidence_commands::record_evidence_link,
+            commands::evidence_commands::list_evidence_links_for_laudo,
+            commands::evidence_commands::read_evidence_asset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SICRO Desktop");
