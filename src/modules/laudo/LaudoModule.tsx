@@ -11,6 +11,7 @@ import { useWorkspaceStore } from "@stores/workspaceStore";
 import { useLaudoStore } from "./store/laudoStore";
 import { LaudoListView } from "./views/LaudoListView";
 import { LaudoEditorView } from "./views/LaudoEditorView";
+import { loadBrandingAssets } from "./document-engine";
 import { commands } from "@core/commands";
 import { toSicroError } from "@core/errors";
 
@@ -18,6 +19,12 @@ export function LaudoModule() {
   const workspacePath = useWorkspaceStore((s) => s.activeWorkspacePath);
   const currentLaudo = useLaudoStore((s) => s.currentLaudo);
   const clearCurrent = useLaudoStore((s) => s.clearCurrent);
+
+  // Pre-load institutional branding assets so the first export doesn't pay
+  // the fetch/data-URI conversion cost on the user's critical path.
+  useEffect(() => {
+    void loadBrandingAssets();
+  }, []);
 
   // Reset transient editor state when switching workspaces.
   useEffect(() => {

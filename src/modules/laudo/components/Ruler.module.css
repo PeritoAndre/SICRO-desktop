@@ -1,0 +1,58 @@
+/*
+ * Réguas horizontal e vertical estilo Word, em SVG.
+ *
+ * Escala: 96 dpi (1 cm = 37,7952 px). As réguas usam pixels para alinhar com
+ * o CSS da folha (`width: 21cm`).
+ */
+
+.horizontal {
+  display: block;
+  /* No background here — let the SVG paint everything. */
+}
+
+.vertical {
+  display: block;
+}
+
+.bg {
+  fill: #2a3a52;
+}
+
+.usable {
+  fill: #3d4f6c;
+}
+
+.tick {
+  stroke: #b8c2cf;
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.label {
+  fill: #d8dde6;
+  font-family: var(--font-mono, "JetBrains Mono", Consolas, monospace);
+  font-size: 9px;
+  dominant-baseline: middle;
+  user-select: none;
+}
+
+.handle {
+  fill: var(--sicro-accent);
+  stroke: rgba(0, 0, 0, 0.2);
+  stroke-width: 0.5;
+}
+
+.pageMark {
+  stroke: var(--sicro-accent);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+  opacity: 0.75;
+}
+
+.pageLabel {
+  fill: var(--sicro-accent);
+  font-family: var(--font-mono, "JetBrains Mono", Consolas, monospace);
+  font-size: 9px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}

@@ -6,25 +6,54 @@
  * `.sicrodoc`) so the preview reflects unsaved edits.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Copy, Eye, X } from "lucide-react";
-import { renderSicroDocToHtml, type SicroDoc } from "../document-engine";
+import {
+  loadBrandingAssets,
+  renderSicroDocToHtml,
+  type BrandingAssets,
+  type SicroDoc,
+} from "../document-engine";
+import type { Occurrence } from "@domain/occurrence";
 import styles from "./HtmlPreview.module.css";
 
 interface HtmlPreviewProps {
   doc: SicroDoc | null;
   liveContent: SicroDoc["content"] | null;
+  /** Optional — feeds the institutional header (MVP 2). */
+  occurrence?: Occurrence | null;
   onClose: () => void;
 }
 
-export function HtmlPreview({ doc, liveContent, onClose }: HtmlPreviewProps) {
+export function HtmlPreview({
+  doc,
+  liveContent,
+  occurrence,
+  onClose,
+}: HtmlPreviewProps) {
+  const [branding, setBranding] = useState<BrandingAssets | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadBrandingAssets().then((assets) => {
+      if (!cancelled) setBranding(assets);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const html = useMemo(() => {
     if (!doc) return "";
     const docWithLiveContent: SicroDoc = liveContent
       ? { ...doc, content: liveContent }
       : doc;
-    return renderSicroDocToHtml(docWithLiveContent, { fullDocument: true });
-  }, [doc, liveContent]);
+    return renderSicroDocToHtml(docWithLiveContent, {
+      fullDocument: true,
+      occurrence: (occurrence as unknown as Record<string, unknown>) ?? null,
+      branding,
+    });
+  }, [doc, liveContent, occurrence, branding]);
 
   const copy = async () => {
     try {

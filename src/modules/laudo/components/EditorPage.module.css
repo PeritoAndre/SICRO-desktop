@@ -1,12 +1,17 @@
 /*
- * EditorPage — visual wrapper for the A4 sheet.
+ * EditorPage — single continuous white sheet with visual page break markers.
  *
- * The outer scroll area paints the "office workspace" gray and centers the
- * white sheet. The sheet itself follows institutional margins (doc 04 §20):
- *   top 2.5cm, left 3cm, right 2cm, bottom 2cm.
- *
- * We measure in cm so when the user prints/exports the proportions stay
- * faithful. Inside the page the TipTap content sits in `--font-doc` (serif).
+ * Layout:
+ *   .scroll                              ← gray office workspace, scroll container
+ *     .workspace                          ← center column, holds rulers + sheet
+ *       .topRow                            ← cornerSpacer + HorizontalRuler
+ *       .midRow                            ← VerticalRuler + .sheet
+ *         .sheet                            ← ONE continuous white surface
+ *           aside.sideMark                  ← absolute, first virtual page only
+ *           header.docHeader                 ← absolute, first virtual page only
+ *           .pageBreakLine + .pageBreakLabel ← dashed line at each 29.7cm
+ *           .editorWrap                      ← relative, padding = effective margins
+ *           footer.docFooter                 ← absolute, bottom of last virtual page
  */
 
 .scroll {
@@ -19,13 +24,36 @@
   padding: var(--space-6) var(--space-6) var(--space-12);
 }
 
-.page {
+.workspace {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.topRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 0;
+}
+
+.cornerSpacer {
+  background: #2a3a52;
+  border-bottom-right-radius: 2px;
+}
+
+.midRow {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+/* ---- The continuous sheet ---- */
+
+.sheet {
   width: 21cm;
-  min-height: 29.7cm;
   background: var(--doc-page-bg);
   color: var(--doc-page-fg);
   box-shadow: var(--doc-shadow-elev);
-  padding: 2.5cm 2cm 2cm 3cm;
   border-radius: 2px;
   position: relative;
   font-family: var(--font-doc);
@@ -33,54 +61,184 @@
   line-height: 1.5;
 }
 
-/* The TipTap editor renders a contenteditable with class `.ProseMirror`.
-   We expose a stable class via editorProps.attributes.class instead. */
-.editor :global(.sicro-editor-content) {
-  outline: none;
-  min-height: 24cm;
+/* Page break markers — dashed line across the sheet with a centered label. */
+.pageBreakLine {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed #c4cad3;
+  display: flex;
+  justify-content: center;
+  z-index: 4;
+  pointer-events: none;
 }
 
-.editor :global(.sicro-editor-content > *:first-child) {
+.pageBreakLabel {
+  background: var(--doc-page-bg);
+  padding: 0 8px;
+  margin-top: -8px;
+  font-size: 9pt;
+  color: #98a3b3;
+  letter-spacing: 0.05em;
+  font-family: var(--font-doc);
+  white-space: nowrap;
+}
+
+/* ---- Side mark (first virtual page only) ---- */
+
+.sideMark {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1.5cm;
+  height: 29.7cm;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  pointer-events: none;
+  color: #888;
+  font-size: 8pt;
+  letter-spacing: 4px;
+  user-select: none;
+}
+.sideMarkText {
+  transform: rotate(-90deg);
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+/* ---- Institutional header (first virtual page only) ---- */
+
+.docHeader {
+  position: absolute;
+  z-index: 3;
+  user-select: none;
+  pointer-events: none;
+  text-align: center;
+  border-bottom: 1px solid #444;
+  padding-bottom: 0.3em;
+}
+
+.docBrandRow {
+  display: grid;
+  grid-template-columns: 1.6cm 1fr;
+  align-items: center;
+  gap: 0.4cm;
+}
+
+.brandImagePca {
+  width: 1.6cm;
+  height: 1.6cm;
+  object-fit: contain;
+}
+
+.brandLines {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.05cm;
+}
+
+.brandImageEstado {
+  width: 1.4cm;
+  height: 1.4cm;
+  object-fit: contain;
+  margin-bottom: 0.1cm;
+}
+
+.brandLine {
+  font-weight: 700;
+  font-size: 11pt;
+  line-height: 1.2;
+}
+.brandLine:first-of-type {
+  font-size: 9.5pt;
+}
+
+.docMeta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px 12px;
+  margin-top: 0.3em;
+  font-size: 10pt;
+  text-align: left;
+}
+.docMetaRow strong {
+  margin-right: 4px;
+}
+
+/* ---- Footer (bottom of last virtual page) ---- */
+
+.docFooter {
+  position: absolute;
+  z-index: 3;
+  user-select: none;
+  border-top: 1px solid #aaa;
+  padding-top: 0.3em;
+  font-size: 9pt;
+  color: #444;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+/* ---- Editor (the contenteditable area) ---- */
+
+.editorWrap {
+  position: relative;
+  z-index: 1;
+  /* padding is set inline by EditorPage using effective margins. */
+}
+
+/* The TipTap editor renders a contenteditable with a custom class. */
+.editorWrap :global(.sicro-editor-content) {
+  outline: none;
+  min-height: 18cm;
+}
+
+.editorWrap :global(.sicro-editor-content > *:first-child) {
   margin-top: 0;
 }
 
-.editor :global(.sicro-editor-content h1) {
+.editorWrap :global(.sicro-editor-content h1) {
   font-size: 18pt;
   text-align: center;
   font-weight: 700;
   margin: 1em 0 0.8em;
 }
-.editor :global(.sicro-editor-content h2) {
+.editorWrap :global(.sicro-editor-content h2) {
   font-size: 14pt;
   font-weight: 700;
   margin: 1.2em 0 0.5em;
 }
-.editor :global(.sicro-editor-content h3) {
+.editorWrap :global(.sicro-editor-content h3) {
   font-size: 12pt;
   font-weight: 700;
   margin: 1em 0 0.4em;
 }
-.editor :global(.sicro-editor-content p) {
+.editorWrap :global(.sicro-editor-content p) {
   margin: 0 0 0.6em;
   text-align: justify;
 }
-.editor :global(.sicro-editor-content ul),
-.editor :global(.sicro-editor-content ol) {
+.editorWrap :global(.sicro-editor-content ul),
+.editorWrap :global(.sicro-editor-content ol) {
   padding-left: 1.5em;
   margin: 0 0 0.6em;
 }
 
 /* Figure */
-.editor :global(figure[data-sicro-figure]) {
+.editorWrap :global(figure[data-sicro-figure]) {
   margin: 1.4em auto;
   text-align: center;
 }
-.editor :global(figure[data-sicro-figure] img) {
+.editorWrap :global(figure[data-sicro-figure] img) {
   max-width: 100%;
   height: auto;
   border: 1px solid var(--doc-border);
 }
-.editor :global(figure[data-sicro-figure] figcaption) {
+.editorWrap :global(figure[data-sicro-figure] figcaption) {
   font-size: 10pt;
   color: var(--doc-caption-fg);
   font-style: italic;
@@ -89,31 +247,31 @@
 }
 
 /* Table */
-.editor :global(table[data-sicro-table]) {
+.editorWrap :global(table[data-sicro-table]) {
   border-collapse: collapse;
   width: 100%;
   font-size: 11pt;
   margin: 1em 0;
   table-layout: fixed;
 }
-.editor :global(table[data-sicro-table] td),
-.editor :global(table[data-sicro-table] th) {
+.editorWrap :global(table[data-sicro-table] td),
+.editorWrap :global(table[data-sicro-table] th) {
   border: 1px solid #444;
   padding: 4px 8px;
   vertical-align: top;
 }
-.editor :global(table[data-sicro-table] th) {
+.editorWrap :global(table[data-sicro-table] th) {
   background: #ececec;
   font-weight: 600;
 }
 
 /* Storyboard */
-.editor :global(section[data-sicro-storyboard]) {
+.editorWrap :global(section[data-sicro-storyboard]) {
   border: 1px dashed #c0c0c0;
   padding: 8px 12px;
   margin: 1em 0;
 }
-.editor :global(article[data-sicro-storyboard-item]) {
+.editorWrap :global(article[data-sicro-storyboard-item]) {
   display: grid;
   grid-template-columns: 5cm 1fr;
   gap: 12px;
@@ -121,43 +279,89 @@
   padding: 8px 0;
   border-bottom: 1px solid #eee;
 }
-.editor :global(article[data-sicro-storyboard-item]:last-child) {
+.editorWrap :global(article[data-sicro-storyboard-item]:last-child) {
   border-bottom: none;
 }
-.editor :global(article[data-sicro-storyboard-item] img) {
+.editorWrap :global(article[data-sicro-storyboard-item] img) {
   width: 100%;
   border: 1px solid var(--doc-border);
 }
-.editor :global([data-sicro-storyboard-time]) {
+.editorWrap :global([data-sicro-storyboard-time]) {
   font-family: var(--font-mono);
   font-size: 11pt;
   font-weight: 600;
 }
-.editor :global([data-sicro-storyboard-frame]) {
+.editorWrap :global([data-sicro-storyboard-frame]) {
   font-family: var(--font-mono);
   font-size: 10pt;
   color: var(--doc-page-muted);
   margin-bottom: 4px;
 }
-.editor :global([data-sicro-storyboard-description] p) {
+.editorWrap :global([data-sicro-storyboard-description] p) {
   margin: 0;
   font-size: 11pt;
 }
 
 /* System data inline */
-.editor :global(span[data-sicro-system-data]) {
+.editorWrap :global(span[data-sicro-system-data]) {
   background: rgba(230, 180, 80, 0.18);
   border-bottom: 1px dotted #b07c20;
   padding: 0 2px;
   cursor: pointer;
 }
-.editor :global(span[data-sicro-system-data][data-review-status="reviewed"]) {
+.editorWrap :global(span[data-sicro-system-data][data-review-status="reviewed"]) {
   background: rgba(53, 196, 122, 0.12);
   border-bottom-color: #1f7a44;
 }
 
+/* Quesitos */
+.editorWrap :global(section[data-sicro-quesito-list]) {
+  margin: 1em 0;
+  counter-reset: quesito;
+}
+.editorWrap :global(article[data-sicro-quesito-item]) {
+  margin: 0.8em 0 1em;
+}
+.editorWrap :global(div[data-sicro-quesito-question]) {
+  font-weight: 700;
+  margin-bottom: 0.2em;
+}
+.editorWrap :global(div[data-sicro-quesito-question])::before {
+  content: "Quesito " counter(quesito) ": ";
+  counter-increment: quesito;
+}
+.editorWrap :global(div[data-sicro-quesito-answer]) {
+  margin-left: 1em;
+  text-align: justify;
+}
+.editorWrap :global(div[data-sicro-quesito-answer])::before {
+  content: "Resposta: ";
+  font-weight: 700;
+}
+
+/* Signature */
+.editorWrap :global(section[data-sicro-signature]) {
+  margin: 2em 0 1em;
+  text-align: center;
+}
+.editorWrap :global(section[data-sicro-signature] [data-sicro-signature-place]) {
+  margin-bottom: 2em;
+  text-align: right;
+}
+.editorWrap :global(section[data-sicro-signature] [data-sicro-signature-rule]) {
+  letter-spacing: 1px;
+}
+.editorWrap :global(section[data-sicro-signature] [data-sicro-signature-name]) {
+  font-weight: 700;
+  margin-top: 0.2em;
+}
+.editorWrap :global(section[data-sicro-signature] [data-sicro-signature-role]) {
+  font-style: italic;
+  font-size: 11pt;
+}
+
 /* Placeholder */
-.editor :global(.sicro-editor-content p.is-editor-empty:first-child::before) {
+.editorWrap :global(.sicro-editor-content p.is-editor-empty:first-child::before) {
   content: attr(data-placeholder);
   float: left;
   color: #9aa3b1;

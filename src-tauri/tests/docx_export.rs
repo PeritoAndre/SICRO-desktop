@@ -227,6 +227,116 @@ fn renders_empty_document_without_crashing() {
 }
 
 #[test]
+fn renders_mvp2_quesitos_and_signature() {
+    let envelope = json!({
+        "title": "Laudo MVP2 — Sinistro",
+        "layout": {
+            "page_size": "A4",
+            "orientation": "portrait",
+            "institutional_template": "pca_padrao_v1"
+        },
+        "metadata": { "numero_laudo": "12345/2026" },
+        "content": {
+            "type": "doc",
+            "content": [
+                { "type": "heading", "attrs": { "level": 2 }, "content": [
+                    { "type": "text", "text": "5 – DOS QUESITOS" }
+                ]},
+                {
+                    "type": "quesitoList",
+                    "content": [
+                        {
+                            "type": "quesitoItem",
+                            "content": [
+                                { "type": "quesitoQuestion", "content": [
+                                    { "type": "text", "text": "Houve sinistro?" }
+                                ]},
+                                { "type": "quesitoAnswer", "content": [
+                                    { "type": "text", "text": "RespostaQuesito1" }
+                                ]}
+                            ]
+                        },
+                        {
+                            "type": "quesitoItem",
+                            "content": [
+                                { "type": "quesitoQuestion", "content": [
+                                    { "type": "text", "text": "Quais vestigios?" }
+                                ]},
+                                { "type": "quesitoAnswer", "content": [
+                                    { "type": "text", "text": "RespostaQuesito2" }
+                                ]}
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": "signature",
+                    "attrs": {
+                        "city": "Macapa",
+                        "uf": "AP",
+                        "date": "2026-05-24",
+                        "name": "Perito Andre",
+                        "role": "Perito Criminal"
+                    }
+                }
+            ]
+        }
+    });
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("mvp2.docx");
+    render_doc_to_docx(&envelope, &path).expect("render_doc_to_docx ok");
+
+    let xml = extract_document_xml(&path);
+    assert_contains_all(
+        &xml,
+        &[
+            "Laudo MVP2",
+            "5 – DOS QUESITOS",
+            "Quesito 1:",
+            "Houve sinistro?",
+            "Resposta:",
+            "RespostaQuesito1",
+            "Quesito 2:",
+            "Quais vestigios?",
+            "RespostaQuesito2",
+            "Macapa - AP, 24/05/2026.",
+            "Perito Andre",
+            "Perito Criminal",
+        ],
+    );
+
+    // Header / footer parts should exist in the zip.
+    let file = std::fs::File::open(&path).expect("docx exists");
+    let mut archive = zip::ZipArchive::new(file).expect("zip");
+    let names: Vec<String> = (0..archive.len())
+        .map(|i| archive.by_index(i).unwrap().name().to_string())
+        .collect();
+    let has_header = names.iter().any(|n| n.starts_with("word/header"));
+    let has_footer = names.iter().any(|n| n.starts_with("word/footer"));
+    assert!(has_header, "DOCX should have a header part; entries: {names:?}");
+    assert!(has_footer, "DOCX should have a footer part; entries: {names:?}");
+
+    // The header part should mention the institutional brand.
+    let header_name = names
+        .iter()
+        .find(|n| n.starts_with("word/header"))
+        .cloned()
+        .expect("header part name");
+    let mut header_entry = archive
+        .by_name(&header_name)
+        .expect("header readable");
+    let mut header_xml = String::new();
+    header_entry
+        .read_to_string(&mut header_xml)
+        .expect("header xml utf-8");
+    assert!(
+        header_xml.contains("POLÍCIA CIENTÍFICA DO AMAPÁ"),
+        "header XML should mention the institutional brand; got:\n{header_xml}"
+    );
+}
+
+#[test]
 fn renders_envelope_with_missing_optional_fields() {
     // Defensive case: an envelope that's missing `title` and where a paragraph
     // has no content array at all. Should still produce a valid DOCX with
@@ -248,4 +358,86 @@ fn renders_envelope_with_missing_optional_fields() {
         xml.contains("MinimalText"),
         "missing inline text; xml:\n{xml}"
     );
+}
+
+#[test]
+fn applies_page_margins_from_envelope() {
+    // MVP 2 ajuste runtime 1.2: when the envelope carries
+    // layout.page.margins, the DOCX must encode those values in twips
+    // via <w:pgMar/>. The conversion is 1 cm = 567 twips.
+    //   top=3cm    → 1701
+    //   right=2cm  → 1134
+    //   bottom=2.5cm → 1418
+    //   left=3.5cm → 1985
+    let envelope = json!({
+        "title": "Margens",
+        "layout": {
+            "institutional_template": "pca_padrao_v1",
+            "page": {
+                "margins": {
+                    "top": "3cm",
+                    "right": "2cm",
+                    "bottom": "2.5cm",
+                    "left": "3.5cm"
+                }
+            }
+        },
+        "content": {
+            "type": "doc",
+            "content": [
+                { "type": "paragraph", "content": [{ "type": "text", "text": "Conteudo" }] }
+            ]
+        }
+    });
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("margens.docx");
+    render_doc_to_docx(&envelope, &path).expect("render_doc_to_docx ok");
+
+    let xml = extract_document_xml(&path);
+    assert!(xml.contains("Conteudo"), "missing body text; xml:\n{xml}");
+    assert!(
+        xml.contains("w:top=\"1701\""),
+        "expected w:top=\"1701\" in pgMar; xml:\n{xml}"
+    );
+    assert!(
+        xml.contains("w:right=\"1134\""),
+        "expected w:right=\"1134\" in pgMar; xml:\n{xml}"
+    );
+    assert!(
+        xml.contains("w:bottom=\"1418\""),
+        "expected w:bottom=\"1418\" in pgMar; xml:\n{xml}"
+    );
+    assert!(
+        xml.contains("w:left=\"1985\""),
+        "expected w:left=\"1985\" in pgMar; xml:\n{xml}"
+    );
+}
+
+#[test]
+fn falls_back_to_template_margins_when_envelope_has_no_override() {
+    // No `layout.page.margins` in the envelope → DOCX should use the
+    // institutional template (pca_padrao_v1) defaults:
+    //   top=3cm    → 1701
+    //   right=2cm  → 1134
+    //   bottom=2.5cm → 1418
+    //   left=3.5cm → 1985
+    let envelope = json!({
+        "title": "Defaults",
+        "layout": { "institutional_template": "pca_padrao_v1" },
+        "content": {
+            "type": "doc",
+            "content": [
+                { "type": "paragraph", "content": [{ "type": "text", "text": "Sem override" }] }
+            ]
+        }
+    });
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("defaults.docx");
+    render_doc_to_docx(&envelope, &path).expect("render_doc_to_docx ok");
+
+    let xml = extract_document_xml(&path);
+    assert!(xml.contains("w:top=\"1701\""), "expected template top; xml:\n{xml}");
+    assert!(xml.contains("w:right=\"1134\""), "expected template right; xml:\n{xml}");
+    assert!(xml.contains("w:bottom=\"1418\""), "expected template bottom; xml:\n{xml}");
+    assert!(xml.contains("w:left=\"1985\""), "expected template left; xml:\n{xml}");
 }
