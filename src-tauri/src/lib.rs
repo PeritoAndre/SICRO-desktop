@@ -13,6 +13,7 @@ pub mod hashing;
 pub mod importer;
 pub mod models;
 pub mod state;
+pub mod video;
 pub mod workspace;
 
 use tracing_subscriber::EnvFilter;
@@ -74,6 +75,17 @@ pub fn run() {
             commands::croqui_commands::read_croqui,
             commands::croqui_commands::save_croqui,
             commands::croqui_commands::export_croqui_png,
+            // video (Spike F)
+            commands::video_commands::register_video_media,
+            commands::video_commands::list_video_media,
+            commands::video_commands::open_video_media,
+            commands::video_commands::create_video_event,
+            commands::video_commands::update_video_event,
+            commands::video_commands::delete_video_event,
+            commands::video_commands::collect_video_frame,
+            commands::video_commands::update_storyboard_frame,
+            commands::video_commands::delete_storyboard_frame,
+            commands::video_commands::list_video_operation_logs,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SICRO Desktop");

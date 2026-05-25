@@ -9,6 +9,7 @@ pub mod export;
 pub mod import;
 pub mod laudo;
 pub mod occurrence;
+pub mod video;
 
 pub use croqui::{Croqui, CroquiDoc, CroquiStatus, ExportCroquiPngInput, NewCroquiInput};
 pub use dossie::{
@@ -23,4 +24,9 @@ pub use import::{
 pub use laudo::{Laudo, LaudoDoc, LaudoStatus, NewLaudoInput};
 pub use occurrence::{
     LoadedOccurrence, NewOccurrenceInput, Occurrence, OccurrenceStatus, RecentOccurrence,
+};
+pub use video::{
+    CollectFrameInput, CollectFrameResult, CreateVideoEventInput, RegisterVideoInput,
+    UpdateStoryboardFrameInput, UpdateVideoEventInput, VideoBundle, VideoEvent, VideoExport,
+    VideoMedia, VideoOperationLog, VideoStoryboardFrame,
 };

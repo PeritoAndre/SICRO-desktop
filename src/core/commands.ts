@@ -39,6 +39,19 @@ import type {
   ExportCroquiPngInput,
   NewCroquiInput,
 } from "@domain/croqui";
+import type {
+  CollectFrameInput,
+  CollectFrameResult,
+  CreateVideoEventInput,
+  RegisterVideoInput,
+  UpdateStoryboardFrameInput,
+  UpdateVideoEventInput,
+  VideoBundle,
+  VideoEvent,
+  VideoMedia,
+  VideoOperationLog,
+  VideoStoryboardFrame,
+} from "@domain/video";
 import { toSicroError, type SicroError } from "./errors";
 
 async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -310,6 +323,114 @@ export const commands = {
       workspacePath,
       croquiId,
       input,
+    });
+  },
+
+  // ----- Video (Spike F) -----
+
+  /**
+   * Copies the user-picked video into `videos/originais/`, hashes it
+   * (SHA-256), runs ffprobe and persists the metadata. Returns the
+   * `VideoMedia` row.
+   */
+  registerVideoMedia(
+    workspacePath: string,
+    input: RegisterVideoInput,
+  ): Promise<VideoMedia> {
+    return safeInvoke<VideoMedia>("register_video_media", {
+      workspacePath,
+      input,
+    });
+  },
+
+  /** Lists every video registered in the active occurrence. */
+  listVideoMedia(workspacePath: string): Promise<VideoMedia[]> {
+    return safeInvoke<VideoMedia[]>("list_video_media", { workspacePath });
+  },
+
+  /** Aggregated bundle (media + events + exports + storyboard). */
+  openVideoMedia(workspacePath: string, mediaId: string): Promise<VideoBundle> {
+    return safeInvoke<VideoBundle>("open_video_media", {
+      workspacePath,
+      mediaId,
+    });
+  },
+
+  createVideoEvent(
+    workspacePath: string,
+    input: CreateVideoEventInput,
+  ): Promise<VideoEvent> {
+    return safeInvoke<VideoEvent>("create_video_event", {
+      workspacePath,
+      input,
+    });
+  },
+
+  updateVideoEvent(
+    workspacePath: string,
+    eventId: string,
+    input: UpdateVideoEventInput,
+  ): Promise<VideoEvent> {
+    return safeInvoke<VideoEvent>("update_video_event", {
+      workspacePath,
+      eventId,
+      input,
+    });
+  },
+
+  deleteVideoEvent(workspacePath: string, eventId: string): Promise<void> {
+    return safeInvoke<void>("delete_video_event", { workspacePath, eventId });
+  },
+
+  /**
+   * Extracts a single PNG frame via FFmpeg (NOT a screenshot of the
+   * player). Writes the PNG + sidecar JSON to
+   * `videos/storyboards/frames/` and persists `video_exports` +
+   * `video_storyboard_frames`.
+   */
+  collectVideoFrame(
+    workspacePath: string,
+    input: CollectFrameInput,
+  ): Promise<CollectFrameResult> {
+    return safeInvoke<CollectFrameResult>("collect_video_frame", {
+      workspacePath,
+      input,
+    });
+  },
+
+  updateStoryboardFrame(
+    workspacePath: string,
+    frameId: string,
+    input: UpdateStoryboardFrameInput,
+  ): Promise<VideoStoryboardFrame> {
+    return safeInvoke<VideoStoryboardFrame>("update_storyboard_frame", {
+      workspacePath,
+      frameId,
+      input,
+    });
+  },
+
+  deleteStoryboardFrame(
+    workspacePath: string,
+    frameId: string,
+    deletePng?: boolean,
+  ): Promise<void> {
+    return safeInvoke<void>("delete_storyboard_frame", {
+      workspacePath,
+      frameId,
+      deletePng,
+    });
+  },
+
+  listVideoOperationLogs(
+    workspacePath: string,
+    mediaHash: string,
+    limit?: number,
+  ): Promise<VideoOperationLog[]> {
+    return safeInvoke<VideoOperationLog[]>("list_video_operation_logs", {
+      workspacePath,
+      mediaHash,
+      limit,
     });
   },
 } as const;

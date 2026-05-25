@@ -47,6 +47,14 @@ exports/
 **/exportados-de-teste/
 **/imports_index.json
 
+# Video evidence — never commit real footage or per-frame test PNGs/JSON
+*.mp4
+*.mov
+*.mkv
+*.avi
+*.webm
+*.m4v
+
 # Design source files (keep only the rendered PNG/SVG in the repo)
 *.psd
 *.ai
