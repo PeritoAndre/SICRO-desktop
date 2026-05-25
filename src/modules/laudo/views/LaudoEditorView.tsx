@@ -150,6 +150,10 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
         isPreviewOpen={previewOpen}
         onSave={handleSave}
         onTogglePreview={() => setPreviewOpen((v) => !v)}
+        workspacePath={workspacePath}
+        laudoId={currentLaudo.id}
+        laudoTitle={currentLaudo.title}
+        doc={docForInspector}
       />
 
       {(localError || lastError?.message) && (

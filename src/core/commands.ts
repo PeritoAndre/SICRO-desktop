@@ -14,6 +14,7 @@ import type {
   RecentOccurrence,
 } from "@domain/occurrence";
 import type { Laudo, LaudoDocPayload, NewLaudoInput } from "@domain/laudo";
+import type { Export } from "@domain/export";
 import { toSicroError, type SicroError } from "./errors";
 
 async function safeInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -90,6 +91,56 @@ export const commands = {
       workspacePath,
       laudoId,
       doc,
+    });
+  },
+
+  // ----- Export (Spike C) -----
+
+  /** Writes the rendered HTML to `<workspace>/exports/html/`. */
+  exportLaudoHtml(
+    workspacePath: string,
+    laudoId: string,
+    html: string,
+  ): Promise<Export> {
+    return safeInvoke<Export>("export_laudo_html", {
+      workspacePath,
+      laudoId,
+      html,
+    });
+  },
+
+  /** Renders the HTML to PDF via headless Edge and writes to `exports/pdf/`. */
+  exportLaudoPdf(
+    workspacePath: string,
+    laudoId: string,
+    html: string,
+  ): Promise<Export> {
+    return safeInvoke<Export>("export_laudo_pdf", {
+      workspacePath,
+      laudoId,
+      html,
+    });
+  },
+
+  /** Walks the `.sicrodoc` and produces a DOCX in `exports/docx/`. */
+  exportLaudoDocx(
+    workspacePath: string,
+    laudoId: string,
+  ): Promise<Export> {
+    return safeInvoke<Export>("export_laudo_docx", {
+      workspacePath,
+      laudoId,
+    });
+  },
+
+  /** Lists every export already produced for a given laudo (newest first). */
+  listLaudoExports(
+    workspacePath: string,
+    laudoId: string,
+  ): Promise<Export[]> {
+    return safeInvoke<Export[]>("list_laudo_exports", {
+      workspacePath,
+      laudoId,
     });
   },
 } as const;

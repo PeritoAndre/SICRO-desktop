@@ -19,15 +19,28 @@ import type { SicroDoc } from "./schema";
 import { numberFigures } from "./numbering";
 
 const DOC_STYLES = `
+  /* @page tells Chromium-based renderers (Edge headless --print-to-pdf) to use
+     A4 with institutional margins from doc 04 §20. */
+  @page {
+    size: A4;
+    margin: 2.5cm 2cm 2cm 3cm;
+  }
+
   body { margin: 0; font-family: "Times New Roman", Cambria, serif; color: #111; }
-  .doc-shell { padding: 2.5cm 2cm; max-width: 21cm; margin: 0 auto; background: #fff; }
+  .doc-shell { padding: 0; max-width: 100%; margin: 0; background: #fff; }
+  /* doc-shell padding is intentionally zero for print — @page handles margins.
+     When the HTML is viewed in a browser tab, we still want a comfortable layout: */
+  @media screen {
+    body { padding: 2.5cm 2cm 2cm 3cm; max-width: 21cm; margin: 0 auto; }
+  }
+
   h1 { font-size: 18pt; text-align: center; }
   h2 { font-size: 14pt; }
   h3 { font-size: 12pt; }
   p  { font-size: 12pt; text-align: justify; line-height: 1.5; }
   ul, ol { padding-left: 1.5em; }
   figure[data-sicro-figure] {
-    margin: 1.5em auto; text-align: center;
+    margin: 1.5em auto; text-align: center; page-break-inside: avoid;
   }
   figure[data-sicro-figure] img {
     max-width: 100%; height: auto; border: 1px solid #d8d8d8;
@@ -45,11 +58,13 @@ const DOC_STYLES = `
   table[data-sicro-table] th { background: #ececec; }
   section[data-sicro-storyboard] {
     border: 1px dashed #c0c0c0; padding: 0.5em; margin: 1em 0;
+    page-break-inside: avoid;
   }
   article[data-sicro-storyboard-item] {
     display: grid; grid-template-columns: 200px 1fr; gap: 12px;
     align-items: start; padding: 8px 0;
     border-bottom: 1px solid #eee;
+    page-break-inside: avoid;
   }
   article[data-sicro-storyboard-item]:last-child { border-bottom: none; }
   article[data-sicro-storyboard-item] img {
