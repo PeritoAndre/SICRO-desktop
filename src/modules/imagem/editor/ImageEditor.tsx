@@ -566,14 +566,34 @@ export function ImageEditor({ workspacePath, onClose }: Props) {
       };
       await saveActive(workspacePath, doc, JSON.stringify(metadata));
 
-      // Compõe o PNG visual via Konva (com o crop aplicado visualmente —
-      // veja o KonvaImage abaixo). Backend não re-aplica ajustes pra
-      // evitar dupla aplicação.
-      const dataUrl =
-        stageRef.current?.toDataURL({
-          pixelRatio: 2,
+      // Compõe o PNG visual via Konva — só a região da imagem (com
+      // crop aplicado, ou natural). ANTES capturava o stage inteiro
+      // (com viewport + padding em volta), e o resultado virava uma
+      // PNG enorme com a imagem cortada perdida no meio — quando
+      // voltava pro laudo, ficava minúscula. Agora, calculamos o
+      // bounding box exato da KonvaImage em coords de stage e
+      // pedimos só essa área. PixelRatio normalizado pra 2x da
+      // resolução source (independente do zoom).
+      const dataUrl: string | null = (() => {
+        if (!stageRef.current || !htmlImage) return null;
+        const imageWorldW = cropApplied ? cropApplied.width : htmlImage.width;
+        const imageWorldH = cropApplied
+          ? cropApplied.height
+          : htmlImage.height;
+        const scale = viewport.scale || 1;
+        return stageRef.current.toDataURL({
+          x: viewport.x,
+          y: viewport.y,
+          width: imageWorldW * scale,
+          height: imageWorldH * scale,
+          // pixelRatio normaliza: queremos PNG do tamanho source × 2
+          // (alta resolução pra preservar qualidade). A região
+          // capturada em stage coords é (imageWorldW × scale).
+          // Pra obter output de imageWorldW × 2, pixelRatio = 2/scale.
+          pixelRatio: 2 / scale,
           mimeType: "image/png",
-        }) ?? null;
+        });
+      })();
       const composedBase64 = dataUrl
         ? dataUrl.replace(/^data:image\/png;base64,/, "")
         : null;
