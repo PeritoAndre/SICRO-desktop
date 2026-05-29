@@ -1,27 +1,29 @@
 /**
- * OpenStreetMap scaffold (MVP 9 Road Engine Pro).
+ * OpenStreetMap utilities — types + projeções compartilhadas pela
+ * importação OSM.
  *
- * This module defines the data structures and pure converters needed to
- * turn an OSM dataset (queried via Overpass or similar) into a list of
- * `SicroRoadObject`s. It deliberately does NOT make any network call —
- * that's a follow-up spike. The point of this scaffold is:
+ * Fase S — Removidas as funções v1 `osmWayToRoad` e `osmDatasetToRoads`
+ * (geravam `SicroRoadObject` do engine v1). A conversão OSM → road
+ * agora vive 100% em `road-parity/osmAdapter.ts` (Python Parity Engine).
  *
- *   - Lock the type contract of an OSM ingest so the rest of the engine
- *     can be built against it before networking lands.
- *   - Provide a deterministic `highway=*` → `RoadStyle` mapping covering
- *     the most common Brazilian classifications.
- *   - Project lon/lat to canvas coordinates given a bounding box (the
- *     "viewport" the user pans/zooms to in the future map widget).
+ * Este módulo retém apenas o que é **fonte-agnóstica de motor**:
+ *   - Tipos compartilhados (OsmNode, OsmWay, OsmDataset, OsmViewport)
+ *   - Helpers de classificação tag → estilo (osmTagToRoadStyle, osmLanesHint,
+ *     osmOnewayToDirection)
+ *   - Simplificação Douglas-Peucker (simplifyPolylineDP) — usada pelo
+ *     adapter parity para reduzir nodes redundantes
+ *   - Projeção lon/lat → canvas (projectLonLat, projectWay)
+ *   - Stubs de fetchOverpassBBox / clearOverpassCache (a implementação
+ *     real vive no `OsmImportModal`)
  *
- * Everything here is pure — easy to test, no DOM, no Tauri, no fetch.
+ * Tudo aqui é puro — fácil de testar, sem DOM, sem Tauri, sem fetch real.
  */
 
-import { makeRoad } from "./factories";
-import type {
-  RoadStyle,
-  SicroPoint,
-  SicroRoadObject,
-} from "./schema";
+import type { RoadDirection, RoadStyle, SicroPoint } from "./schema";
+
+// Re-export pros consumers que importavam direto deste módulo.
+// `schema.ts` permanece a fonte canônica.
+export type { RoadDirection, RoadStyle };
 
 /** A single OSM node — geographic point with stable id. */
 export interface OsmNode {
@@ -35,6 +37,19 @@ export interface OsmWay {
   id: number;
   node_refs: number[];
   tags: Record<string, string>;
+}
+
+/**
+ * OSM dataset retornado pelo Overpass — bolha de nodes + ways.
+ *
+ * `from_cache` indica se o dataset veio do cache em memória do modal
+ * (sem hit no Overpass). UI usa esse flag para mostrar "carregado do cache"
+ * em vez de "baixado".
+ */
+export interface OsmDataset {
+  nodes: OsmNode[];
+  ways: OsmWay[];
+  from_cache?: boolean;
 }
 
 /**
@@ -105,6 +120,31 @@ export function osmLanesHint(
 }
 
 /**
+ * Mapeia a tag `oneway=*` para um valor `RoadDirection`.
+ *
+ * Tabela OSM (https://wiki.openstreetmap.org/wiki/Key:oneway):
+ *   - `yes`, `true`, `1`     → one_way
+ *   - `-1`, `reverse`        → one_way (reverso — direction ignorada aqui)
+ *   - `no`, `false`, `0`     → two_way
+ *   - ausente                → unknown (assume bidirecional por padrão na UI)
+ *
+ * O sinal de reverso (`-1`) ainda conta como mão única — quem decidir
+ * inverter o trace é o consumer (o parity adapter ignora o sinal).
+ */
+export function osmOnewayToDirection(
+  tags: Record<string, string>,
+): RoadDirection {
+  const raw = tags.oneway;
+  if (raw == null) return "unknown";
+  const v = String(raw).trim().toLowerCase();
+  if (v === "yes" || v === "true" || v === "1" || v === "-1" || v === "reverse") {
+    return "one_way";
+  }
+  if (v === "no" || v === "false" || v === "0") return "two_way";
+  return "unknown";
+}
+
+/**
  * Project a lon/lat point onto canvas pixel coordinates inside the
  * given viewport. Pure linear interpolation — no projection distortion
  * correction, which is fine at city-block scale.
@@ -143,75 +183,117 @@ export function projectWay(
   return out;
 }
 
-/**
- * Convert one OSM way into a `SicroRoadObject` ready to drop into the
- * croqui. Returns null when the way is too short to be a road
- * (fewer than 2 nodes after projection) or doesn't have a `highway` tag
- * — we ignore non-roads here on purpose, the caller can filter the
- * way list before calling.
- */
-export function osmWayToRoad(
-  way: OsmWay,
-  nodes: Map<number, OsmNode>,
-  view: OsmViewport,
-): SicroRoadObject | null {
-  if (!way.tags.highway) return null;
-  const points = projectWay(way, nodes, view);
-  if (points.length < 4) return null;
-  const style = osmTagToRoadStyle(way.tags);
-  const lanes = osmLanesHint(way.tags);
-  const road = makeRoad(points, style, {
-    subtype: "osm_way",
-    metadata_json: JSON.stringify({
-      osm_id: way.id,
-      tags: way.tags,
-    }),
-  });
-  if (lanes && lanes !== road.lane_count) {
-    return { ...road, lane_count: lanes };
-  }
-  return road;
+// ---------------------------------------------------------------------------
+// Douglas-Peucker — simplificação de polyline genérica.
+//
+// O algoritmo recursivo encontra o ponto mais distante do segmento entre
+// os endpoints; se a distância > epsilon, divide e recurse; senão, descarta
+// todos os intermediários. Preserva endpoints exatos — essencial para que
+// o parity adapter mantenha ring fechado de rotatórias.
+//
+// Implementação iterativa via stack para evitar stack-overflow em ways
+// gigantes (raro em OSM mas defensivo).
+
+/** Ponto 2D mínimo — compatível com Vec2M do parity adapter. */
+interface Vec2Like {
+  x: number;
+  y: number;
 }
 
 /**
- * Convert a complete OSM dataset (nodes + ways) into a list of road
- * objects projected to canvas. Ways without a `highway` tag are
- * silently dropped.
+ * Distância perpendicular do ponto `p` ao segmento `a→b`. Se `a == b`,
+ * cai pra distância euclidiana ao ponto.
  */
-export function osmDatasetToRoads(
-  ways: OsmWay[],
-  nodes: OsmNode[],
-  view: OsmViewport,
-): SicroRoadObject[] {
-  const nodeIndex = new Map<number, OsmNode>();
-  for (const n of nodes) nodeIndex.set(n.id, n);
-  const out: SicroRoadObject[] = [];
-  for (const w of ways) {
-    const r = osmWayToRoad(w, nodeIndex, view);
-    if (r) out.push(r);
+function perpendicularDistance(p: Vec2Like, a: Vec2Like, b: Vec2Like): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-12) {
+    const px = p.x - a.x;
+    const py = p.y - a.y;
+    return Math.hypot(px, py);
+  }
+  // Projeção escalar sobre o segmento, clampada a [0, 1] não é necessária
+  // aqui — queremos a distância perpendicular à reta, não ao segmento.
+  const num = Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x);
+  return num / Math.sqrt(lenSq);
+}
+
+/**
+ * Simplifica uma polilinha pelo algoritmo de Douglas-Peucker.
+ *
+ * - `epsilon` < 0 ou polyline com < 3 pontos → retorna cópia rasa intacta.
+ * - Preserva primeiro e último ponto sempre.
+ * - Genérico sobre `T extends Vec2Like` para que o adapter possa passar
+ *   seus Vec2M sem coerções.
+ */
+export function simplifyPolylineDP<T extends Vec2Like>(
+  points: ReadonlyArray<T>,
+  epsilon: number,
+): T[] {
+  if (points.length < 3 || epsilon <= 0) {
+    return points.slice();
+  }
+
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+
+  // Stack de pares (lo, hi) — usa Int32Array seria mais rápido, mas
+  // number[] é suficiente pra ways OSM (geralmente < 1000 nodes).
+  const stack: Array<[number, number]> = [[0, points.length - 1]];
+
+  while (stack.length > 0) {
+    const top = stack.pop();
+    if (!top) break;
+    const [lo, hi] = top;
+    if (hi - lo < 2) continue;
+    const a = points[lo] as T;
+    const b = points[hi] as T;
+    let maxDist = -1;
+    let maxIdx = -1;
+    for (let i = lo + 1; i < hi; i++) {
+      const d = perpendicularDistance(points[i] as T, a, b);
+      if (d > maxDist) {
+        maxDist = d;
+        maxIdx = i;
+      }
+    }
+    if (maxIdx >= 0 && maxDist > epsilon) {
+      keep[maxIdx] = 1;
+      stack.push([lo, maxIdx]);
+      stack.push([maxIdx, hi]);
+    }
+  }
+
+  const out: T[] = [];
+  for (let i = 0; i < points.length; i++) {
+    if (keep[i]) out.push(points[i] as T);
   }
   return out;
 }
 
 /**
- * Reserved for a future spike: query the Overpass API for a bounding
- * box and return parsed nodes + ways. Kept here as a stub so the rest
- * of the engine can reference the contract.
- *
- * @example
- *   const data = await fetchOverpassBBox({
- *     min_lat: -0.34, max_lat: -0.32,
- *     min_lon: -51.07, max_lon: -51.05,
- *   });
+ * Stub. A implementação real do fetch Overpass vive no modal `OsmImportModal`
+ * (com cache em memória e timeout). Esta função fica aqui só pra preservar
+ * o contrato esperado por código legado que ainda importa.
  */
 export async function fetchOverpassBBox(_bbox: {
   min_lat: number;
   max_lat: number;
   min_lon: number;
   max_lon: number;
-}): Promise<{ nodes: OsmNode[]; ways: OsmWay[] }> {
+}): Promise<OsmDataset> {
   throw new Error(
-    "OSM fetch not implemented yet — this is the Road Engine Pro scaffold. " +
-      "See `osm.ts` for the contract; wire Overpass in a follow-up spike.",
+    "OSM fetch stub — Overpass real impl é feita inline no OsmImportModal. " +
+      "Importe diretamente lá se precisar.",
   );
+}
+
+/**
+ * Cache opcional (limpa via `clearOverpassCache`) usado pelo modal — função
+ * stub aqui pra preservar a API. O cache real está dentro do modal.
+ */
+export function clearOverpassCache(): void {
+  // no-op: cache fica no modal
 }

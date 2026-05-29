@@ -306,7 +306,15 @@ fn renders_mvp2_quesitos_and_signature() {
         ],
     );
 
-    // Header / footer parts should exist in the zip.
+    // N — Header hardcoded REMOVIDO. O DOCX agora NÃO carrega header
+    // institucional fixo. Esta asserção atua como regressão: garante
+    // que ninguém reintroduza, por engano, o header antigo enquanto N11
+    // não tiver implementado a injeção dinâmica de `envelope.header.content`.
+    //
+    // Quando N11 entrar em produção, esta seção será reescrita para:
+    //   1. construir envelope com `header: { enabled: true, content: {...} }`
+    //   2. assertar que `word/header*` existe E reflete o content dinâmico
+    //   3. assertar que envelope SEM header NÃO produz `word/header*`
     let file = std::fs::File::open(&path).expect("docx exists");
     let mut archive = zip::ZipArchive::new(file).expect("zip");
     let names: Vec<String> = (0..archive.len())
@@ -314,26 +322,11 @@ fn renders_mvp2_quesitos_and_signature() {
         .collect();
     let has_header = names.iter().any(|n| n.starts_with("word/header"));
     let has_footer = names.iter().any(|n| n.starts_with("word/footer"));
-    assert!(has_header, "DOCX should have a header part; entries: {names:?}");
-    assert!(has_footer, "DOCX should have a footer part; entries: {names:?}");
-
-    // The header part should mention the institutional brand.
-    let header_name = names
-        .iter()
-        .find(|n| n.starts_with("word/header"))
-        .cloned()
-        .expect("header part name");
-    let mut header_entry = archive
-        .by_name(&header_name)
-        .expect("header readable");
-    let mut header_xml = String::new();
-    header_entry
-        .read_to_string(&mut header_xml)
-        .expect("header xml utf-8");
     assert!(
-        header_xml.contains("POLÍCIA CIENTÍFICA DO AMAPÁ"),
-        "header XML should mention the institutional brand; got:\n{header_xml}"
+        !has_header,
+        "N — DOCX não deve mais carregar header hardcoded; entries: {names:?}"
     );
+    assert!(has_footer, "DOCX should have a footer part; entries: {names:?}");
 }
 
 #[test]

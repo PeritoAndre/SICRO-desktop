@@ -40,6 +40,7 @@ import {
   inferCategory,
   makeLine,
   makeMarker,
+  makeRoundabout,
   makeMeasurement,
   makeRoad,
   makeText,
@@ -66,6 +67,8 @@ import {
 import { useEditorState, type Tool } from "./useEditorState";
 import { UnsavedChangesModal } from "./UnsavedChangesModal";
 import { DroneImportModal } from "./DroneImportModal";
+import { OsmImportModal, type OsmImportResult } from "./OsmImportModal";
+import { computeAutoDimensions } from "../engine/road-v2";
 import styles from "./CroquiEditor.module.css";
 
 export function CroquiEditor() {
@@ -89,6 +92,7 @@ export function CroquiEditor() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [showPhotoPicker, setShowPhotoPicker] = useState(false);
   const [showDroneImport, setShowDroneImport] = useState(false);
+  const [showOsmImport, setShowOsmImport] = useState(false);
   const editor = useEditorState();
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<CanvasStageHandle | null>(null);
@@ -176,6 +180,35 @@ export function CroquiEditor() {
       objs.map((o) => (o.id === id ? ({ ...o, ...patch } as SicroObject) : o)),
     );
   };
+
+  /**
+   * Fase H.3 — patch handler para `parity_objects`. Imutável e
+   * preserva a discriminação `kind` do objeto (não pode trocar de
+   * `road_parity` para `roundabout_parity` via patch).
+   */
+  const handleParityObjectChange = useCallback(
+    (
+      id: string,
+      patch: Partial<import("../engine/road-parity").SicroParityObject>,
+    ) => {
+      setDoc((prev) => {
+        if (!prev?.parity_objects) return prev;
+        const next = prev.parity_objects.map((o) => {
+          if (o.id !== id) return o;
+          // Preserva `kind` original (patch não pode mudá-lo).
+          if (o.kind === "road_parity") {
+            return { ...o, ...patch, kind: "road_parity" as const };
+          }
+          if (o.kind === "roundabout_parity") {
+            return { ...o, ...patch, kind: "roundabout_parity" as const };
+          }
+          return o;
+        });
+        return { ...prev, parity_objects: next };
+      });
+    },
+    [],
+  );
 
   const handleDelete = useCallback(() => {
     const id = editor.selectedId;
@@ -398,6 +431,237 @@ export function CroquiEditor() {
     setFeedback("Rotação do fundo reiniciada.");
   }, [handleBackgroundChange]);
 
+  /**
+   * MVP 10 — OSM import done. Append the new RoadObjects, stamp the
+   * session into `doc.osm_imports`, mark the doc dirty. Suggested
+   * scale is recorded but NOT auto-applied: the perito has to confirm
+   * via the existing "Definir escala" tool.
+   */
+  const handleOsmImportConfirm = useCallback(
+    (result: OsmImportResult) => {
+      if (!doc) return;
+
+      // Fase S — único motor de importação OSM é o parity.
+      // O modal devolve apenas `parity_roads` + `parity_roundabouts`.
+      console.groupCollapsed(
+        `[OSM] Importação parity ${result.session.imported_at} — ${result.parity_roads.length} via(s) + ${result.parity_roundabouts.length} rotatória(s)`,
+      );
+      console.log("session", result.session);
+      for (const road of result.parity_roads) {
+        let meta: Record<string, unknown> = {};
+        try {
+          meta = road.metadata_json ? JSON.parse(road.metadata_json) : {};
+        } catch {
+          // ignore
+        }
+        console.log("road_parity", {
+          id: road.id,
+          label: road.label,
+          source: meta.source ?? "manual",
+          highway: meta.highway,
+          oneway: meta.oneway,
+          arc_length_m: meta.arc_length_m,
+          largura_m: road.largura_m,
+          superficie: road.superficie,
+          mao_dupla: road.mao_dupla,
+          marcacao: road.marcacao,
+          ax: road.ax,
+          ay: road.ay,
+          bx: road.bx,
+          by: road.by,
+        });
+      }
+      for (const rb of result.parity_roundabouts) {
+        let meta: Record<string, unknown> = {};
+        try {
+          meta = rb.metadata_json ? JSON.parse(rb.metadata_json) : {};
+        } catch {
+          // ignore
+        }
+        console.log("roundabout_parity", {
+          id: rb.id,
+          label: rb.label,
+          source: meta.source ?? "manual",
+          osm_id: meta.osm_id,
+          cx_m: rb.cx,
+          cy_m: rb.cy,
+          r_m: rb.r_m,
+          largura_m: rb.largura_m,
+          superficie: rb.superficie,
+          inner_color: rb.inner_color,
+        });
+      }
+      if (result.warnings.length > 0)
+        console.log("warnings", result.warnings);
+      console.groupEnd();
+
+      setDoc((prev) => {
+        if (!prev) return prev;
+        editor.pushHistory(prev.objects);
+        const nextImports = [
+          ...(prev.osm_imports ?? []),
+          result.session,
+        ];
+        // Substituir parity_objects OSM antigos. Não toca em objetos
+        // parity criados manualmente (sem source === "osm").
+        const isOsmParity = (
+          o: import("../engine/road-parity").SicroParityObject,
+        ): boolean => {
+          if (!o.metadata_json) return false;
+          try {
+            const m = JSON.parse(o.metadata_json) as { source?: unknown };
+            return m.source === "osm";
+          } catch {
+            return false;
+          }
+        };
+        const keptParity = (prev.parity_objects ?? []).filter(
+          (o) => !isOsmParity(o),
+        );
+        return {
+          ...prev,
+          // Não tocamos em `objects` (legados v1/v2 ficam intactos
+          // por compat de docs antigos, mas não renderizam mais).
+          parity_objects: [
+            ...keptParity,
+            ...result.parity_roads,
+            ...result.parity_roundabouts,
+          ],
+          osm_imports: nextImports,
+          road_engine_version: "parity",
+          // Garante que o renderer tenha escala definida — usa a
+          // sugerida pelo fit se ainda não houver escala.
+          scale:
+            prev.scale ??
+            (result.session.suggested_px_per_m
+              ? {
+                  px_per_m: Math.max(
+                    result.session.suggested_px_per_m,
+                    1,
+                  ),
+                }
+              : { px_per_m: 10 }),
+        };
+      });
+
+      const firstParitySelectable =
+        result.parity_roads[0] ?? result.parity_roundabouts[0];
+      if (firstParitySelectable)
+        editor.setSelectedId(firstParitySelectable.id);
+      setShowOsmImport(false);
+      const parityScaleMsg = result.session.suggested_px_per_m
+        ? ` Escala sugerida: ${result.session.suggested_px_per_m.toFixed(2)} px/m.`
+        : "";
+      const parityRbMsg =
+        result.parity_roundabouts.length > 0
+          ? ` · ${result.parity_roundabouts.length} rotatória(s)`
+          : "";
+      const parityWarnMsg =
+        result.warnings.length > 0
+          ? ` · ${result.warnings.length} aviso(s) — veja o console`
+          : "";
+      if (result.warnings.length > 0) {
+        for (const w of result.warnings) console.warn("[OSM-parity]", w);
+      }
+      setFeedback(
+        `Importadas ${result.parity_roads.length} via(s)${parityRbMsg} do OSM (centro ${result.session.center_lat.toFixed(5)}, ${result.session.center_lon.toFixed(5)} · raio ${result.session.radius_m} m). Vias OSM anteriores foram substituídas.${parityScaleMsg}${parityWarnMsg}`,
+      );
+    },
+    [doc, editor],
+  );
+
+  /**
+   * Fase H.3 — Insere uma fixture de teste do Python Parity Engine.
+   *
+   * Cria: 1 rotatória central + 4 vias arteriais entrando pelos
+   * cardeais + 1 via curva diagonal. Força `road_engine_version: "parity"`
+   * no doc, garante `scale.px_per_m` definido (10 px/m default), e
+   * empurra os objetos para `parity_objects` (array separado de
+   * `objects` legado — ver H.1).
+   *
+   * Útil para validar o renderer parity dentro do app real sem
+   * precisar de ferramenta "Criar via" interativa (que entra em H.6).
+   */
+  const handleInsertParityDemo = useCallback(() => {
+    if (!doc) return;
+    // Lazy import para evitar bundle bloat — só carrega quando o
+    // perito clica.
+    void import("../engine/road-parity").then((parity) => {
+      // Cena de demonstração — centro do canvas, raios proporcionais
+      // a um croqui típico (canvas ~1600×1000 px, escala default 10 px/m).
+      const pxPerM = doc.scale?.px_per_m ?? 10;
+      // Centro do canvas no mundo (em metros) — usado como referência.
+      const cxM = doc.canvas.width_px / 2 / pxPerM;
+      const cyM = doc.canvas.height_px / 2 / pxPerM;
+
+      const rb = parity.makeParityRoundabout(cxM, cyM, 12, {
+        largura_m: 7.5,
+        label: "Rotatória central",
+      });
+      const arm = 60; // metros do centro
+      const offset = 14; // perto do anel
+      const norte = parity.makeParityRoad(cxM, cyM - offset, cxM, cyM - arm, {
+        largura_m: 7.5,
+        marcacao: "amarela",
+        label: "Norte",
+      });
+      const sul = parity.makeParityRoad(cxM, cyM + offset, cxM, cyM + arm, {
+        largura_m: 7.5,
+        marcacao: "amarela",
+        label: "Sul",
+      });
+      const leste = parity.makeParityRoad(cxM + offset, cyM, cxM + arm, cyM, {
+        largura_m: 7.5,
+        marcacao: "amarela",
+        label: "Leste",
+      });
+      const oeste = parity.makeParityRoad(cxM - offset, cyM, cxM - arm, cyM, {
+        largura_m: 7.5,
+        marcacao: "amarela",
+        label: "Oeste",
+      });
+      const diagonal = parity.makeParityRoadBezier(
+        cxM - 50,
+        cyM - 40,
+        cxM - 20,
+        cyM - 50,
+        cxM + 20,
+        cyM - 50,
+        cxM + 50,
+        cyM - 30,
+        {
+          largura_m: 6.0,
+          marcacao: "branca",
+          mao_dupla: false,
+          label: "Diagonal residencial",
+        },
+      );
+
+      setDoc((prev) => {
+        if (!prev) return prev;
+        editor.pushHistory(prev.objects);
+        return {
+          ...prev,
+          road_engine_version: "parity",
+          parity_objects: [
+            ...(prev.parity_objects ?? []),
+            rb,
+            norte,
+            sul,
+            leste,
+            oeste,
+            diagonal,
+          ],
+          // Garante px_per_m definido para o renderer (10 px/m default).
+          scale: prev.scale ?? { px_per_m: 10 },
+        };
+      });
+      setFeedback(
+        "Demo Parity inserido: rotatória central + 4 vias arteriais + 1 diagonal residencial. Road Engine = Python Parity.",
+      );
+    });
+  }, [doc, editor]);
+
   /** Remove the background entirely. */
   const handleRemoveBackground = useCallback(() => {
     setDoc((prev) =>
@@ -504,6 +768,15 @@ export function CroquiEditor() {
     const markerSubtype = toolToMarkerSubtype(tool);
     if (markerSubtype) {
       addObject(makeMarker(p, markerSubtype));
+      editor.setTool("select");
+      return;
+    }
+    if (tool === "roundabout") {
+      // Road Engine 2.0 Ciclo 2 — single-click insertion of a rotatória
+      // primitive at the clicked point. Defaults r=80 / width=14 (from
+      // factories.ts). Inspector lets the perito tweak afterwards.
+      const nextLabel = nextRoundaboutLabel(doc.objects);
+      addObject(makeRoundabout(p, nextLabel));
       editor.setTool("select");
       return;
     }
@@ -900,6 +1173,8 @@ export function CroquiEditor() {
         onImportBackground={() => void handleImportBackground()}
         onPickFromDossie={() => setShowPhotoPicker(true)}
         onImportDrone={() => setShowDroneImport(true)}
+        onImportOsm={() => setShowOsmImport(true)}
+        onInsertParityDemo={handleInsertParityDemo}
         onCenterBackground={handleCenterBackground}
         onFitBackground={handleFitBackground}
         onResetBackgroundRotation={handleResetBackgroundRotation}
@@ -928,6 +1203,7 @@ export function CroquiEditor() {
           onCanvasClick={handleCanvasClick}
           onCanvasDblClick={handleCanvasDblClick}
           onObjectChange={handleObjectChange}
+          onParityObjectChange={handleParityObjectChange}
           onBackgroundChange={handleBackgroundChange}
           onSelect={(id) => editor.setSelectedId(id)}
           workspacePath={workspacePath}
@@ -966,6 +1242,53 @@ export function CroquiEditor() {
           handleDelete();
         }}
         onMoveObject={handleMoveObject}
+        onRecalcRoundaboutProportion={(roundaboutId) => {
+          // Ciclo 2 v6 — encontra as vias cuja ponta (start/end)
+          // está dentro de uma banda de tolerância do anel externo
+          // dessa rotatória, calcula a proporção otimizada com base
+          // nas larguras dessas vias + lane_count, e aplica via
+          // patch no objeto.
+          if (!doc) return;
+          const rb = doc.objects.find(
+            (o) => o.id === roundaboutId && o.kind === "roundabout",
+          );
+          if (!rb || rb.kind !== "roundabout") return;
+          const cx = rb.cx;
+          const cy = rb.cy;
+          const r = rb.r;
+          const connectedWidths: number[] = [];
+          for (const o of doc.objects) {
+            if (o.kind !== "road") continue;
+            if (o.points.length < 4) continue;
+            const halfW = o.width / 2;
+            const tol = halfW * 1.5;
+            const sx = o.points[0] as number;
+            const sy = o.points[1] as number;
+            const ex = o.points[o.points.length - 2] as number;
+            const ey = o.points[o.points.length - 1] as number;
+            const dStart = Math.hypot(sx - cx, sy - cy);
+            const dEnd = Math.hypot(ex - cx, ey - cy);
+            if (
+              (dStart >= r - tol && dStart <= r + tol) ||
+              (dEnd >= r - tol && dEnd <= r + tol)
+            ) {
+              connectedWidths.push(o.width);
+            }
+          }
+          const dims = computeAutoDimensions({
+            roadWidths: connectedWidths,
+            laneCount: rb.lane_count ?? 1,
+          });
+          handleObjectChange(roundaboutId, {
+            r: dims.outerRadius,
+            width: dims.circulatingWidth,
+          } as Partial<SicroObject>);
+          setFeedback(
+            connectedWidths.length > 0
+              ? `Rotatória reproporcionada com ${connectedWidths.length} via(s) conectada(s).`
+              : "Nenhuma via conectada — usando defaults base.",
+          );
+        }}
       />
 
       {showPhotoPicker && (
@@ -1007,6 +1330,22 @@ export function CroquiEditor() {
             );
           }}
           onCancel={() => setShowDroneImport(false)}
+        />
+      )}
+
+      {showOsmImport && (
+        <OsmImportModal
+          canvasWidth={doc.canvas.width_px}
+          canvasHeight={doc.canvas.height_px}
+          dossieCoords={
+            occurrence?.latitude != null && occurrence?.longitude != null
+              ? { lat: occurrence.latitude, lon: occurrence.longitude }
+              : null
+          }
+          // Fase S — `engine` prop removida. O modal agora sempre usa o
+          // Python Parity Engine; Road v2 OSM adapter foi descontinuado.
+          onConfirm={handleOsmImportConfirm}
+          onCancel={() => setShowOsmImport(false)}
         />
       )}
 
@@ -1174,6 +1513,19 @@ function nextVehicleLabel(objs: SicroObject[]): string {
   return "V";
 }
 
+function nextRoundaboutLabel(objs: SicroObject[]): string {
+  const taken = new Set<number>();
+  for (const o of objs) {
+    if (o.kind !== "roundabout" || !o.label) continue;
+    const m = /^R(\d+)$/.exec(o.label);
+    if (m) taken.add(Number(m[1]));
+  }
+  for (let i = 1; i < 100; i++) {
+    if (!taken.has(i)) return `R${i}`;
+  }
+  return "R";
+}
+
 // ---------------------------------------------------------------------------
 // Status bar (bottom)
 
@@ -1181,6 +1533,11 @@ function StatusBar({
   tool,
   pointer,
   viewport,
+  // Fase S — Road engine toggle removido. Mantive a função StatusBar com
+  // os mesmos parâmetros visíveis para minimizar churn, mas as props
+  // `roadEngineVersion`, `onToggleRoadEngine`, `roadDebugV2`,
+  // `onToggleRoadDebugV2` deixaram de ser aceitas — o pill agora é
+  // estático "Road Parity".
   scale,
   objectCount,
   totalsByCategory,
@@ -1261,6 +1618,26 @@ function StatusBar({
       </span>
       <span style={{ color: exportColor, fontWeight: 600 }}>
         ● {exportLabel}
+      </span>
+      {/* Fase S — indicador estático "Road Parity". Antes era um toggle
+          que ciclava v1 → v2 → parity → v1; v1 e v2 foram removidos (viraram
+          stubs no-op) e o único motor real agora é o Python Parity Engine.
+          Mantemos o pill apenas para o perito ver de relance qual motor
+          está ativo. Não é clicável. */}
+      <span
+        title="Python Parity Engine — único motor de via ativo após Fase S"
+        style={{
+          marginLeft: "auto",
+          padding: "2px 8px",
+          fontSize: "11px",
+          border: "1px solid #7c3aed",
+          background: "#ede9fe",
+          color: "#6d28d9",
+          borderRadius: "4px",
+          fontWeight: 600,
+        }}
+      >
+        Road Parity
       </span>
       <span className={styles.statusFeedback}>{feedback}</span>
     </div>

@@ -37,11 +37,11 @@ use crate::filesystem::{
     atomic_write_bytes, resolve_workspace_relative, sanitize_relative_path,
 };
 use crate::hashing::sha256::sha256_file;
-use crate::image_editor::{metadata, pipeline};
+use crate::image_editor::{filters, metadata, pipeline, processor, report};
 use crate::models::{
-    CreateImageAnalysisInput, ExportImageInput, ImageAnalysis, ImageAssetBytes,
-    ImageExport, ImageMetadata, ImageOperationLog, ImageSourceKind,
-    ImportLocalImageInput,
+    BackendAdjustments, BackendOperation, CreateImageAnalysisInput, ExportImageInput,
+    ImageAnalysis, ImageAssetBytes, ImageExport, ImageHistogram, ImageMetadata,
+    ImageOperationLog, ImageSourceKind, ImportLocalImageInput,
 };
 use crate::workspace::manifest::{Manifest, SQLITE_FILENAME};
 
@@ -569,4 +569,277 @@ fn sanitize_slug(s: &str) -> String {
     } else {
         trimmed
     }
+}
+
+// ---------------------------------------------------------------------------
+// G12 — Image Engine Pro: novos commands.
+// ---------------------------------------------------------------------------
+
+/// G12.9 — Histograma + estatísticas da imagem original.
+///
+/// `relative_path` aponta para uma imagem dentro do workspace (geralmente
+/// a `original_relative_path` da análise). O backend decodifica para
+/// RgbaImage e calcula histograma + média/desvio por canal.
+#[tauri::command]
+pub async fn compute_image_histogram(
+    workspace_path: String,
+    relative_path: String,
+) -> Result<ImageHistogram> {
+    let ws = PathBuf::from(&workspace_path);
+    let abs = resolve_workspace_relative(&ws, &relative_path)?;
+    let img = image::open(&abs)
+        .map_err(|e| {
+            SicroError::Filesystem(format!(
+                "não consegui abrir {}: {}",
+                abs.display(),
+                e
+            ))
+        })?
+        .to_rgba8();
+    Ok(filters::histogram::compute(&img))
+}
+
+/// G12 — Preview synchronous de uma operação aplicada. Aceita base64 da
+/// imagem corrente (PNG ou JPEG), aplica UMA operação, devolve PNG base64.
+/// Usado pelo `ProcessingStackPanel` para mostrar previews antes de gravar.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApplyOperationPreviewInput {
+    /// PNG ou JPEG em base64 (sem prefixo data:image/).
+    pub image_base64: String,
+    pub operation: BackendOperation,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ApplyOperationPreviewResult {
+    pub image_base64: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[tauri::command]
+pub async fn apply_operation_preview(
+    input: ApplyOperationPreviewInput,
+) -> Result<ApplyOperationPreviewResult> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&input.image_base64)
+        .map_err(|e| SicroError::Validation(format!("base64 inválido: {e}")))?;
+    let img = image::load_from_memory(&bytes)
+        .map_err(|e| SicroError::Validation(format!("imagem inválida: {e}")))?
+        .to_rgba8();
+    let out = processor::apply_operation(img, &input.operation);
+    let (w, h) = (out.width(), out.height());
+
+    let mut buf = Vec::new();
+    {
+        use std::io::Cursor;
+        let mut cursor = Cursor::new(&mut buf);
+        out.write_to(&mut cursor, image::ImageFormat::Png)
+            .map_err(|e| {
+                SicroError::Workspace(format!("falha ao codificar PNG: {e}"))
+            })?;
+    }
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
+    Ok(ApplyOperationPreviewResult {
+        image_base64: b64,
+        width: w,
+        height: h,
+    })
+}
+
+/// G12 — Aplica uma pilha de operações na imagem original e retorna
+/// PNG base64 + dimensões. Sem persistir nada — quem persiste é o
+/// `export_image_derivative`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ApplyOperationStackInput {
+    pub relative_path: String,
+    #[serde(default)]
+    pub adjustments: Option<BackendAdjustments>,
+    #[serde(default)]
+    pub operations: Vec<BackendOperation>,
+    /// Output como JPG (false = PNG, default).
+    #[serde(default)]
+    pub as_jpeg: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ApplyOperationStackResult {
+    pub image_base64: String,
+    pub mime: String,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[tauri::command]
+pub async fn apply_operation_stack(
+    workspace_path: String,
+    input: ApplyOperationStackInput,
+) -> Result<ApplyOperationStackResult> {
+    let ws = PathBuf::from(&workspace_path);
+    let abs = resolve_workspace_relative(&ws, &input.relative_path)?;
+    let mut img = image::open(&abs)
+        .map_err(|e| {
+            SicroError::Filesystem(format!(
+                "não consegui abrir {}: {}",
+                abs.display(),
+                e
+            ))
+        })?
+        .to_rgba8();
+
+    if let Some(adj) = input.adjustments.as_ref() {
+        processor::apply_adjustments(&mut img, adj);
+    }
+    for op in &input.operations {
+        img = processor::apply_operation(img, op);
+    }
+    let (w, h) = (img.width(), img.height());
+
+    let (fmt, mime) = if input.as_jpeg {
+        (image::ImageFormat::Jpeg, "image/jpeg")
+    } else {
+        (image::ImageFormat::Png, "image/png")
+    };
+    let mut buf = Vec::new();
+    {
+        use std::io::Cursor;
+        let mut cursor = Cursor::new(&mut buf);
+        img.write_to(&mut cursor, fmt).map_err(|e| {
+            SicroError::Workspace(format!("falha ao codificar: {e}"))
+        })?;
+    }
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
+    Ok(ApplyOperationStackResult {
+        image_base64: b64,
+        mime: mime.to_string(),
+        width: w,
+        height: h,
+    })
+}
+
+/// G12.21 — Gera relatório de análise pericial em HTML.
+///
+/// Inputs: análise existente. O backend coleta tudo (EXIF, hashes do
+/// arquivo original, ops do `processing_stack` no `.sicroimage`, logs
+/// do banco, thumbnail da imagem) e produz HTML auto-contido.
+///
+/// O front pode então abrir num iframe (preview) ou chamar o pipeline
+/// PDF (via Edge headless) passando esse HTML.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ImageAnalysisReportArtifact {
+    pub html: String,
+    pub output_relative_path: String,
+}
+
+#[tauri::command]
+pub async fn generate_image_analysis_report(
+    workspace_path: String,
+    analysis_id: String,
+) -> Result<ImageAnalysisReportArtifact> {
+    let ws = PathBuf::from(&workspace_path);
+    let _manifest = Manifest::read(&ws)?;
+    let mut conn = open_connection(&ws.join(SQLITE_FILENAME))?;
+    run_migrations(&mut conn)?;
+
+    let analysis_uuid = Uuid::parse_str(&analysis_id)
+        .map_err(|e| SicroError::Validation(format!("UUID inválido: {e}")))?;
+    let analysis = image_analysis_repo::find_by_id(&conn, &analysis_uuid)?
+        .ok_or_else(|| SicroError::Validation("análise não encontrada".to_string()))?;
+
+    // Lê o `.sicroimage`.
+    let doc_abs =
+        resolve_workspace_relative(&ws, &analysis.analysis_relative_path)?;
+    let doc_bytes = std::fs::read(&doc_abs).map_err(|e| {
+        SicroError::Filesystem(format!("cannot read .sicroimage: {e}"))
+    })?;
+    let doc_json: serde_json::Value = serde_json::from_slice(&doc_bytes)
+        .map_err(|e| SicroError::Validation(format!(".sicroimage inválido: {e}")))?;
+
+    // Lê hashes do arquivo original (4 algoritmos).
+    let orig_abs =
+        resolve_workspace_relative(&ws, &analysis.original_relative_path)?;
+    let hashes = crate::image_editor::hashes::compute_all_hashes(&orig_abs).ok();
+    let hashes_json = hashes.as_ref().and_then(|h| serde_json::to_value(h).ok());
+
+    // EXIF.
+    let exif_value =
+        crate::image_editor::exif::read_exif_value(&orig_abs);
+
+    // Operation logs (últimos 100).
+    let logs_rows =
+        image_analysis_repo::list_logs_for_analysis(&conn, &analysis_uuid, 100)?;
+    let logs: Vec<serde_json::Value> = logs_rows
+        .iter()
+        .map(|l| {
+            json!({
+                "created_at": l.created_at.to_rfc3339(),
+                "action": l.action,
+                "details_json": l.details_json,
+            })
+        })
+        .collect();
+
+    // Thumbnail — lê imagem, faz resize para 800px de largura, encode PNG.
+    let thumb_data_uri = match image::open(&orig_abs) {
+        Ok(img) => {
+            let rgba = img.to_rgba8();
+            let max_w: u32 = 800;
+            let (w, h) = (rgba.width(), rgba.height());
+            let (tw, th) = if w > max_w {
+                let scale = max_w as f32 / w as f32;
+                (max_w, (h as f32 * scale).max(1.0) as u32)
+            } else {
+                (w, h)
+            };
+            let resized = image::imageops::resize(
+                &rgba,
+                tw,
+                th,
+                image::imageops::FilterType::Lanczos3,
+            );
+            let mut buf = Vec::new();
+            {
+                use std::io::Cursor;
+                let mut cursor = Cursor::new(&mut buf);
+                if resized
+                    .write_to(&mut cursor, image::ImageFormat::Png)
+                    .is_ok()
+                {
+                    Some(report::encode_thumbnail_data_uri(&buf, "image/png"))
+                } else {
+                    None
+                }
+            }
+        }
+        Err(_) => None,
+    };
+
+    let report_input = report::ReportInput {
+        analysis: &analysis,
+        doc_json: &doc_json,
+        exif_json: exif_value.as_ref(),
+        hashes_json: hashes_json.as_ref(),
+        operation_logs: &logs,
+        thumbnail_data_uri: thumb_data_uri,
+    };
+    let html = report::render_html(&report_input);
+
+    // Grava HTML em `imagens/relatorios/`.
+    let stamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let rel = format!(
+        "imagens/relatorios/{}_{}.html",
+        sanitize_slug(&analysis.title),
+        stamp
+    );
+    let abs = resolve_workspace_relative(&ws, &rel)?;
+    if let Some(parent) = abs.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            SicroError::Filesystem(format!("cannot create reports dir: {e}"))
+        })?;
+    }
+    atomic_write_bytes(&abs, html.as_bytes())?;
+
+    Ok(ImageAnalysisReportArtifact {
+        html,
+        output_relative_path: rel,
+    })
 }

@@ -76,6 +76,13 @@ pub fn render_doc_to_docx(
 
     let mut docx = build_institutional_chrome(Docx::new(), template_id, metadata.as_ref());
 
+    // N11 — Header dinâmico Word-style. Se envelope.header existir,
+    // estiver enabled e tiver conteúdo não-vazio, monta um Header DOCX
+    // nativo iterando os blocos do ProseMirror.
+    if let Some(header) = build_dynamic_header(envelope) {
+        docx = docx.header(header);
+    }
+
     // Apply effective page margins. The resolution order matches the editor:
     //   envelope.layout.page.margins  >  institutional template default  >  SICRO default.
     docx = docx.page_margin(resolve_page_margin(envelope, template_id));
@@ -182,61 +189,29 @@ fn resolve_page_margin(envelope: &Value, template_id: Option<&str>) -> PageMargi
 }
 
 // ===========================================================================
-// MVP 2 — institutional chrome (header / footer)
+// N — Institutional chrome (footer apenas; header agora é dinâmico)
+//
+// Header hardcoded REMOVIDO. Antes essa seção injetava 3 linhas fixas
+// (GOVERNO DO ESTADO DO AMAPÁ / POLÍCIA CIENTÍFICA / DEPTO CRIMINALÍSTICA)
+// + "Laudo nº" no Header nativo do DOCX. Em N11 será reintroduzida a
+// injeção de Header LENDO `envelope.header.content` (ProseMirror JSON),
+// percorrendo os nodes com a mesma máquina do walker do body, e só quando
+// `envelope.header.enabled === true`.
+//
+// O Footer permanece como antes — N só refatora o header.
+// Marca lateral continua intencionalmente fora do DOCX (texto rotacionado
+// em margem é frágil entre Word desktop / LibreOffice / Office Mobile).
 
-/// Apply Header + Footer to the docx based on the institutional template id.
-/// Marca lateral é intencionalmente omitida no DOCX (texto rotacionado em
-/// margem é frágil entre Word desktop / LibreOffice / Office Mobile;
-/// preferimos pular a representar mal).
 fn build_institutional_chrome(
     docx: Docx,
     template_id: Option<&str>,
     metadata: Option<&serde_json::Map<String, Value>>,
 ) -> Docx {
-    // Spike B did not set `institutional_template`; we default to PCA padrão.
-    let id = template_id.unwrap_or("pca_padrao_v1");
-    match id {
-        "pca_padrao_v1" => pca_padrao_v1_chrome(docx, metadata),
-        _ => docx,
-    }
-}
-
-fn pca_padrao_v1_chrome(
-    docx: Docx,
-    metadata: Option<&serde_json::Map<String, Value>>,
-) -> Docx {
-    let brand_lines = [
-        "GOVERNO DO ESTADO DO AMAPÁ",
-        "POLÍCIA CIENTÍFICA DO AMAPÁ",
-        "DEPARTAMENTO DE CRIMINALÍSTICA",
-    ];
-
-    let mut header = Header::new();
-    for line in brand_lines.iter() {
-        header = header.add_paragraph(
-            Paragraph::new()
-                .align(AlignmentType::Center)
-                .add_run(Run::new().add_text(*line).bold().size(20)),
-        );
-    }
-
-    // Single optional line with "Laudo nº" if present in metadata.
-    if let Some(numero) = metadata
-        .and_then(|m| m.get("numero_laudo"))
-        .and_then(Value::as_str)
-    {
-        if !numero.trim().is_empty() {
-            header = header.add_paragraph(
-                Paragraph::new()
-                    .align(AlignmentType::Right)
-                    .add_run(
-                        Run::new()
-                            .add_text(format!("Laudo nº {}", numero))
-                            .size(18),
-                    ),
-            );
-        }
-    }
+    // N — `template_id` e `metadata` deixam de alimentar o header hardcoded
+    // mas seguem disponíveis para o footer (e para futuras políticas
+    // dependentes de template). Marcamos como consumidos para o compilador.
+    let _ = template_id;
+    let _ = metadata;
 
     let footer = Footer::new().add_paragraph(
         Paragraph::new()
@@ -249,7 +224,71 @@ fn pca_padrao_v1_chrome(
             ),
     );
 
-    docx.header(header).footer(footer)
+    // N — Header NÃO é mais aplicado aqui. É construído por
+    // `build_dynamic_header` (N11) e aplicado no caller a partir do
+    // `envelope.header.content`.
+    docx.footer(footer)
+}
+
+/// N11 — Constrói um Header DOCX nativo a partir do envelope.header.
+///
+/// Retorna `None` quando:
+///   - envelope não tem campo `header`,
+///   - `header.enabled === false`,
+///   - `header.content` está vazio (só parágrafo vazio).
+///
+/// Caso contrário monta um `Header::new()` iterando os blocos
+/// top-level do `header.content.content` e convertendo cada um em
+/// `Paragraph` via as MESMAS funções usadas no walker do body
+/// (`paragraph_from_inline`, `heading_paragraph`). Isso garante que
+/// formatação inline (bold/italic/underline/cor/alinhamento) seja
+/// preservada com a mesma fidelidade.
+///
+/// Limitações conhecidas (alpha): nodes complexos como Figure, Storyboard,
+/// EvidenceTable, Quesito não são suportados no header — apenas
+/// paragraph/heading. Imagens inline via Image node são embedadas como
+/// placeholder italic (mesmo fallback do body para imagens não
+/// resolvíveis).
+fn build_dynamic_header(envelope: &Value) -> Option<Header> {
+    let header_node = envelope.get("header")?;
+    let enabled = header_node
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !enabled {
+        return None;
+    }
+    let content_doc = header_node.get("content")?;
+    let blocks = children(content_doc);
+    if blocks.is_empty() {
+        return None;
+    }
+    // Detecta header "trivialmente vazio" (apenas 1 parágrafo sem texto).
+    if blocks.len() == 1
+        && type_of(&blocks[0]) == "paragraph"
+        && children(&blocks[0]).is_empty()
+    {
+        return None;
+    }
+
+    let mut header = Header::new();
+    for node in &blocks {
+        match type_of(node) {
+            "paragraph" => {
+                header = header.add_paragraph(paragraph_from_inline(node));
+            }
+            "heading" => {
+                header = header.add_paragraph(heading_paragraph(node));
+            }
+            // Fallback: trata qualquer outro top-level como parágrafo
+            // (extrai texto recursivamente). Mantém o header útil mesmo
+            // se aparecerem nodes inesperados de schemas futuros.
+            _ => {
+                header = header.add_paragraph(fallback_paragraph(node));
+            }
+        }
+    }
+    Some(header)
 }
 
 // ===========================================================================

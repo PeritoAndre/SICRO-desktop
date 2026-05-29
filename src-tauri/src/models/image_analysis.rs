@@ -194,6 +194,7 @@ fn default_gamma() -> f32 {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BackendOperation {
+    // ---------- Geometric (MVP 7 — original)
     Rotate90Cw,
     Rotate90Ccw,
     Rotate180,
@@ -209,6 +210,138 @@ pub enum BackendOperation {
         width: u32,
         height: u32,
     },
+
+    // ---------- G12.1 — Edge detection
+    /// Detecção de bordas Sobel (gradiente).
+    EdgeSobel {
+        /// Intensidade da resposta em [0.0, 4.0]. 1.0 = neutro.
+        #[serde(default = "default_one")]
+        strength: f32,
+    },
+    /// Detecção de bordas Laplaciano (5x5 kernel).
+    EdgeLaplacian {
+        #[serde(default = "default_one")]
+        strength: f32,
+    },
+    /// Canny (binário). Limites configuráveis.
+    EdgeCanny {
+        #[serde(default = "default_low_threshold")]
+        low_threshold: f32,
+        #[serde(default = "default_high_threshold")]
+        high_threshold: f32,
+    },
+
+    // ---------- G12.2 — Blur / denoise
+    /// Gaussian blur. `sigma` controla o spread; raio = ceil(3*sigma).
+    BlurGaussian {
+        sigma: f32,
+    },
+    /// Median filter — remove outliers preservando bordas. `radius` em pixels.
+    BlurMedian {
+        radius: u32,
+    },
+    /// Bilateral (simplificado) — suaviza preservando edges. Custoso.
+    BlurBilateral {
+        sigma_space: f32,
+        sigma_color: f32,
+    },
+
+    // ---------- G12.3 — Enhancement
+    /// CLAHE — equalização adaptativa por blocos (tiles).
+    Clahe {
+        #[serde(default = "default_tile_size")]
+        tile_size: u32,
+        #[serde(default = "default_clip_limit")]
+        clip_limit: f32,
+    },
+    /// Histogram equalization global na luminância.
+    HistogramEqualize,
+    /// Auto-levels — estica histograma por canal (RGB) para [percentile_low, percentile_high].
+    AutoLevels {
+        #[serde(default = "default_percentile_low")]
+        percentile_low: f32,
+        #[serde(default = "default_percentile_high")]
+        percentile_high: f32,
+    },
+    /// White balance gray-world.
+    WhiteBalanceGrayWorld,
+
+    // ---------- G12.4 — Morphology (em luminância)
+    /// Dilatação morfológica (kernel quadrado 3x3 ou 5x5).
+    Dilate {
+        #[serde(default = "default_radius")]
+        radius: u32,
+    },
+    /// Erosão morfológica.
+    Erode {
+        #[serde(default = "default_radius")]
+        radius: u32,
+    },
+    /// Abertura morfológica = erode → dilate.
+    Open {
+        #[serde(default = "default_radius")]
+        radius: u32,
+    },
+    /// Fechamento morfológico = dilate → erode.
+    Close {
+        #[serde(default = "default_radius")]
+        radius: u32,
+    },
+
+    // ---------- G12.6 — Perspective
+    /// Correção de perspectiva — 4 cantos source → 4 cantos destination.
+    /// Coordenadas em pixels da imagem original. Output: `output_width` x `output_height`.
+    Perspective {
+        src: [[f32; 2]; 4],
+        dst: [[f32; 2]; 4],
+        output_width: u32,
+        output_height: u32,
+    },
+
+    // ---------- G12 — Extras úteis
+    /// Unsharp mask — sharpening clássico.
+    UnsharpMask {
+        sigma: f32,
+        #[serde(default = "default_one")]
+        amount: f32,
+    },
+    /// Threshold simples (binarização).
+    Threshold {
+        value: u8,
+    },
+    /// Pixelize uma região (anonimização).
+    Pixelize {
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        block_size: u32,
+    },
+}
+
+fn default_one() -> f32 {
+    1.0
+}
+fn default_low_threshold() -> f32 {
+    50.0
+}
+fn default_high_threshold() -> f32 {
+    150.0
+}
+fn default_tile_size() -> u32 {
+    8
+}
+fn default_clip_limit() -> f32 {
+    2.0
+}
+fn default_percentile_low() -> f32 {
+    1.0
+}
+fn default_percentile_high() -> f32 {
+    99.0
+}
+fn default_radius() -> u32 {
+    1
 }
 
 // ---------------------------------------------------------------------------
@@ -224,6 +357,55 @@ pub struct ImageMetadata {
     pub hash_sha256: Option<String>,
     /// JSON serialised — vazio quando não houver EXIF lido.
     pub exif_json: Option<String>,
+    /// G12.8 — Conjunto completo de hashes pericial (opcional).
+    /// Computado só quando o caller pede `compute_hash=true` e o backend
+    /// suporta — fica `None` em metadados leves.
+    #[serde(default)]
+    pub hash_set: Option<HashSet>,
+}
+
+/// G12.8 — Conjunto de hashes para chain of custody pericial.
+///
+/// MD5 é matematicamente comprometido, mas ainda é exigido por convenção
+/// em muitos laudos institucionais. SHA-1 idem. SHA-256 é o atual padrão
+/// recomendado. SHA-3-256 é a próxima geração (Keccak), oferecido como
+/// "future-proofing" para laudos que precisem sobreviver décadas.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HashSet {
+    pub md5: String,
+    pub sha1: String,
+    pub sha256: String,
+    pub sha3_256: String,
+}
+
+/// G12.9 — Histograma + estatísticas básicas de uma imagem.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageHistogram {
+    /// 256 bins (count de pixels com cada valor 0..255), canal R.
+    pub red: Vec<u32>,
+    pub green: Vec<u32>,
+    pub blue: Vec<u32>,
+    /// Luminância calculada via 0.299R + 0.587G + 0.114B.
+    pub luminance: Vec<u32>,
+    pub stats: HistogramStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistogramStats {
+    /// Per-channel mean (0..255).
+    pub mean_r: f32,
+    pub mean_g: f32,
+    pub mean_b: f32,
+    pub mean_lum: f32,
+    /// Per-channel stddev.
+    pub stddev_r: f32,
+    pub stddev_g: f32,
+    pub stddev_b: f32,
+    pub stddev_lum: f32,
+    /// Min / Max do canal de luminância (útil para gauge de dinâmica).
+    pub min_lum: u8,
+    pub max_lum: u8,
+    pub total_pixels: u32,
 }
 
 // ---------------------------------------------------------------------------

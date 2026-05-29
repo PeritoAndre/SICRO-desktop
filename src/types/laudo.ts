@@ -21,6 +21,10 @@ export interface Laudo {
   updated_at: string;
   last_export_pdf: string | null;
   last_export_docx: string | null;
+  /** H/I — populated by `list_laudos`: tipo da assinatura digital
+   *  encontrada no .sicrodoc.
+   *  Ausente quando o laudo não foi assinado ainda. */
+  signature_type?: "gov_br" | "sigdocs" | "A1" | "A3" | "mock" | null;
 }
 
 export interface NewLaudoInput {

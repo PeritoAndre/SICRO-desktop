@@ -1,0 +1,155 @@
+/* N — HeaderToolbar styles. Barra flutuante no topo do editor (sticky),
+ * visível apenas em modo edição de cabeçalho. */
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 14px;
+  background: linear-gradient(180deg, #fafbff 0%, #f0f3fb 100%);
+  border-bottom: 1px solid #c9d2e6;
+  box-shadow: 0 1px 4px rgba(31, 111, 235, 0.06);
+  font-family: system-ui, -apple-system, sans-serif;
+  font-size: 12px;
+  color: #1a2a4a;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1f6feb;
+  display: inline-block;
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, 0.18);
+}
+
+.subtitle {
+  font-weight: 400;
+  font-style: italic;
+  color: #5b6b8b;
+  font-size: 11px;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.label {
+  font-weight: 500;
+  color: #5b6b8b;
+}
+
+.numberInput {
+  width: 56px;
+  padding: 3px 6px;
+  border: 1px solid #c9d2e6;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 12px;
+  background: #fff;
+  color: #1a2a4a;
+  text-align: right;
+}
+.numberInput:focus {
+  outline: none;
+  border-color: #1f6feb;
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.18);
+}
+
+.unit {
+  color: #5b6b8b;
+  font-size: 11px;
+}
+
+.presets {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.presetBtn {
+  padding: 3px 8px;
+  border: 1px solid #c9d2e6;
+  border-radius: 4px;
+  background: #fff;
+  color: #1a2a4a;
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+.presetBtn:hover {
+  background: #eef2fb;
+  border-color: #a4b4d8;
+}
+.presetBtnActive {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
+}
+.presetBtnActive:hover {
+  background: #1a5dc6;
+  border-color: #1a5dc6;
+}
+
+.cap {
+  color: #98a2b3;
+  font-size: 10.5px;
+  margin-left: 6px;
+  font-style: italic;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.primaryBtn {
+  padding: 5px 12px;
+  border: none;
+  background: #1f6feb;
+  color: #fff;
+  font-weight: 600;
+  font-family: inherit;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.primaryBtn:hover {
+  background: #1a5dc6;
+}
+
+.dangerBtn {
+  padding: 5px 12px;
+  border: 1px solid #d6d9e3;
+  background: #fff;
+  color: #b53939;
+  font-weight: 500;
+  font-family: inherit;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+.dangerBtn:hover {
+  background: #fff0f0;
+  border-color: #f5b5b5;
+}

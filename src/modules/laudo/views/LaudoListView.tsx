@@ -16,6 +16,7 @@ import { formatRelative } from "@core/formatters";
 import { useLaudoStore } from "../store/laudoStore";
 import { useWorkspaceStore } from "@stores/workspaceStore";
 import { NewLaudoDialog } from "../components/NewLaudoDialog";
+import { SignatureBadge } from "../components/SignatureBadge";
 import type { OccurrenceContext } from "../document-engine";
 import type { Laudo, LaudoStatus } from "@domain/laudo";
 import type { Occurrence, OccurrenceStatus } from "@domain/occurrence";
@@ -101,7 +102,17 @@ export function LaudoListView({
                     style={{ display: "flex", justifyContent: "space-between", gap: 8 }}
                   >
                     <h3 className={styles.cardTitle}>{laudo.title}</h3>
-                    <StatusPill status={mapLaudoStatus(laudo.status)} />
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
+                    >
+                      {/* H — Badge de assinatura digital (gov.br/A1/A3/mock) */}
+                      <SignatureBadge type={laudo.signature_type ?? null} />
+                      <StatusPill status={mapLaudoStatus(laudo.status)} />
+                    </div>
                   </div>
                   <code className={styles.path}>{laudo.relative_path}</code>
                   <div className={styles.cardMeta}>

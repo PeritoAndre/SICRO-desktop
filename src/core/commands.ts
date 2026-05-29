@@ -67,17 +67,24 @@ import type {
   WorkspaceIntegrityReport,
 } from "@domain/evidence_registry";
 import type {
+  ApplyOperationPreviewInput,
+  ApplyOperationPreviewResult,
+  ApplyOperationStackInput,
+  ApplyOperationStackResult,
   CreateImageAnalysisInput,
   ExportImageInput,
   ImageAnalysis,
   ImageAnalysisPayload,
+  ImageAnalysisReportArtifact,
   ImageAssetBytes,
   ImageExport,
+  ImageHistogram,
   ImageMetadata,
   ImageOperationLog,
   ImportLocalImageInput,
   SaveImageAnalysisInput,
 } from "@domain/image_analysis";
+import type { PhotoImportResult } from "@domain/photo_drop";
 import type {
   BackupArtifact,
   HealthReportArtifact,
@@ -160,6 +167,108 @@ export const commands = {
       laudoId,
       doc,
     });
+  },
+
+  /**
+   * H — Importa um PDF assinado (gov.br ou SIGDOCS) de volta para o
+   * workspace. Grava em `laudos/<id>/assinados/<filename>.pdf`,
+   * computa SHA-256 e devolve metadados para o frontend persistir em
+   * `doc.finalization.signature`.
+   */
+  importSignedPdf(
+    workspacePath: string,
+    input: {
+      laudo_id: string;
+      source_absolute_path: string;
+      preferred_filename?: string | null;
+    },
+  ): Promise<{
+    relative_path: string;
+    sha256: string;
+    size_bytes: number;
+  }> {
+    return safeInvoke("import_signed_pdf", { workspacePath, input });
+  },
+
+  // ----- I — Integração SIGDOCS -----
+
+  /** Resolve a URL do SIGDOCS efetiva do workspace (manifest ou default). */
+  getSigdocsUrl(
+    workspacePath: string,
+  ): Promise<{ url: string; source: "manifest" | "default" }> {
+    return safeInvoke("get_sigdocs_url", { workspacePath });
+  },
+
+  /** Onda 1 — abre o SIGDOCS numa janela secundária do SO. */
+  openSigdocsWindow(url?: string): Promise<void> {
+    return safeInvoke("open_sigdocs_window", { url: url ?? null });
+  },
+
+  closeSigdocsWindow(): Promise<void> {
+    return safeInvoke("close_sigdocs_window", {});
+  },
+
+  /**
+   * Onda 3 — "Cover mode": abre o SIGDOC num webview borderless que
+   * cobre EXATAMENTE a área de conteúdo do editor (entre topbar e
+   * statusbar, à direita da rail). `bounds` em CSS px relativos ao
+   * webview principal.
+   */
+  openSigdocsCover(
+    url: string | null,
+    bounds: { x: number; y: number; width: number; height: number },
+  ): Promise<void> {
+    return safeInvoke("open_sigdocs_cover", { url, bounds });
+  },
+
+  /** Reposiciona o cover quando a área disponível muda (resize, route change). */
+  updateSigdocsCoverBounds(bounds: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  }): Promise<void> {
+    return safeInvoke("update_sigdocs_cover_bounds", { bounds });
+  },
+
+  closeSigdocsCover(): Promise<void> {
+    return safeInvoke("close_sigdocs_cover", {});
+  },
+
+  /**
+   * Abre o Explorer do SO (Windows/macOS/Linux) na pasta de um
+   * arquivo, selecionando-o. Usado quando o perito vai arrastar o
+   * PDF exportado pra dentro do SIGDOC (que bloqueia Ctrl+V).
+   */
+  revealPathInExplorer(absolutePath: string): Promise<void> {
+    return safeInvoke("reveal_path_in_explorer", { absolutePath });
+  },
+
+  // K — Credenciais SIGDOC (Windows Credential Manager)
+
+  /**
+   * Salva email + senha do SIGDOC no Windows Credential Manager
+   * (criptografado per-user). O autofill é injetado automaticamente
+   * quando o cover do SIGDOC abre.
+   */
+  saveSigdocCredentials(email: string, password: string): Promise<void> {
+    return safeInvoke("save_sigdoc_credentials", { email, password });
+  },
+
+  /**
+   * Lê o status das credenciais — retorna o email cadastrado e SE há
+   * senha no keyring. NUNCA retorna a senha em si por segurança.
+   */
+  getSigdocCredentialsStatus(): Promise<{
+    email: string | null;
+    has_password: boolean;
+  }> {
+    return safeInvoke("get_sigdoc_credentials_status", {});
+  },
+
+  /** Remove email + senha do SIGDOC do storage. */
+  deleteSigdocCredentials(): Promise<void> {
+    return safeInvoke("delete_sigdoc_credentials", {});
   },
 
   // ----- Export (Spike C) -----
@@ -636,6 +745,30 @@ export const commands = {
     });
   },
 
+  /**
+   * O — Drag & drop de fotos no editor de laudo. Recebe um lote de
+   * paths de arquivo (vindos do `onDragDropEvent` do Tauri). Para cada
+   * foto: copia pra `<workspace>/laudos/<id>/evidencias/photos/`,
+   * calcula SHA-256, lê dimensões + EXIF, escreve sidecar JSON, e
+   * retorna metadata pra inserir no doc.
+   *
+   * O command NUNCA aborta o lote: itens inválidos vão no array
+   * `errors` com a razão; itens válidos vão no `imported`.
+   */
+  importDraggedPhotosToLaudo(
+    workspacePath: string,
+    laudoId: string,
+    filePaths: string[],
+  ): Promise<PhotoImportResult> {
+    return safeInvoke<PhotoImportResult>("import_dragged_photos_to_laudo", {
+      input: {
+        workspace_path: workspacePath,
+        laudo_id: laudoId,
+        file_paths: filePaths,
+      },
+    });
+  },
+
   listImageAnalyses(workspacePath: string): Promise<ImageAnalysis[]> {
     return safeInvoke<ImageAnalysis[]>("list_image_analyses", {
       workspacePath,
@@ -708,6 +841,65 @@ export const commands = {
       analysisId,
       limit,
     });
+  },
+
+  // ----- G12 — Image Engine Pro -----
+
+  /**
+   * G12.9 — Calcula histograma (256 bins R/G/B/Lum) + estatísticas
+   * de uma imagem do workspace.
+   */
+  computeImageHistogram(
+    workspacePath: string,
+    relativePath: string,
+  ): Promise<ImageHistogram> {
+    return safeInvoke<ImageHistogram>("compute_image_histogram", {
+      workspacePath,
+      relativePath,
+    });
+  },
+
+  /**
+   * G12 — Preview rápido de uma única operação. Recebe a imagem corrente
+   * em base64 (PNG), aplica a operação, devolve PNG base64. Não persiste
+   * nada — usado pelos panels para mostrar antes/depois.
+   */
+  applyOperationPreview(
+    input: ApplyOperationPreviewInput,
+  ): Promise<ApplyOperationPreviewResult> {
+    return safeInvoke<ApplyOperationPreviewResult>(
+      "apply_operation_preview",
+      { input },
+    );
+  },
+
+  /**
+   * G12 — Aplica uma pilha de operações sobre a imagem original.
+   * Útil para o ProcessingStackPanel mostrar resultado consolidado.
+   */
+  applyOperationStack(
+    workspacePath: string,
+    input: ApplyOperationStackInput,
+  ): Promise<ApplyOperationStackResult> {
+    return safeInvoke<ApplyOperationStackResult>("apply_operation_stack", {
+      workspacePath,
+      input,
+    });
+  },
+
+  /**
+   * G12.21 — Gera relatório HTML de análise pericial. Backend coleta
+   * tudo (EXIF, hashes, ops, logs, thumbnail) e produz HTML auto-contido
+   * gravado em `imagens/relatorios/`.
+   */
+  generateImageAnalysisReport(
+    workspacePath: string,
+    analysisId: string,
+  ): Promise<ImageAnalysisReportArtifact> {
+    return safeInvoke<ImageAnalysisReportArtifact>(
+      "generate_image_analysis_report",
+      { workspacePath, analysisId },
+    );
   },
 
   // ----- Consolidação Alpha (MVP 8) -----

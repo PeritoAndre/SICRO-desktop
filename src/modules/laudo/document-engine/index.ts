@@ -1,4 +1,9 @@
 export { laudoExtensions } from "./extensions";
+// N — Extensões TipTap reduzidas para o cabeçalho Word-style.
+export {
+  headerExtensions,
+  type HeaderExtensionsOptions,
+} from "./header-extensions";
 export {
   coerceSicroDoc,
   emptyDocContent,
@@ -8,6 +13,21 @@ export {
   type SicroDocMetadata,
   type SicroDocPage,
   type SicroDocPageMargins,
+  // F8 — Schema 1.1.0
+  type SicroDocStatus,
+  type SicroDocComment,
+  type SicroDocCommentReply,
+  type SicroDocSnapshot,
+  type SicroDocFinalization,
+  // F12.11 — Assinatura digital
+  type SicroDocSignature,
+  // N — Schema 1.2.0 (cabeçalho Word-style)
+  type SicroDocHeader,
+  emptyHeaderContent,
+  clampHeaderHeightCm,
+  DEFAULT_HEADER_HEIGHT_CM,
+  HEADER_HEIGHT_MIN_CM,
+  HEADER_HEIGHT_MAX_CM,
 } from "./schema";
 export {
   A4_PAGE,
@@ -24,6 +44,7 @@ export {
   validateSicroDoc,
   type DocumentWarning,
   type WarningSeverity,
+  type ValidationCategory,
 } from "./validators";
 export {
   TEMPLATES,
@@ -36,6 +57,8 @@ export {
   PCA_PADRAO_V1,
   findInstitutionalTemplate,
   resolveHeaderField,
+  // N12 — Migração de docs legados.
+  seedHeaderContentFromInstitutionalTemplate,
   type InstitutionalTemplate,
   type InstitutionalTemplateId,
 } from "./institutional-templates";
@@ -55,6 +78,7 @@ export {
 export {
   resolveEvidenceSrcsForEditor,
   normalizeEvidenceSrcsForSave,
+  joinWorkspace,
 } from "./relative-src";
 export {
   Figure,
@@ -68,10 +92,127 @@ export {
   QuesitoQuestion,
   QuesitoAnswer,
   Signature,
+  PhotoPlate,
+  photoPlateSlots,
+  photoPlateColumns,
   type FigureKind,
+  type FigureAlign,
   type StoryboardEvidenceItem,
   type SystemDataReviewStatus,
   type EvidenceTableKind,
   type EvidenceTableColumn,
   type EvidenceTableRow,
+  type PhotoPlateLayout,
+  type PhotoPlateEntry,
 } from "./nodes";
+
+// F6 — Extração + numeração de figuras (paralelo a sections).
+//
+// Note: `buildFigureList` é distinto do `numberFigures` legado em
+// `./numbering.ts` (que injeta números na legenda do JSON inteiro durante
+// render). O `buildFigureList` apenas extrai uma lista numerada para a UI.
+export {
+  extractFigures,
+  buildFigureList,
+  type FigureEntry,
+  type NumberedFigureEntry,
+  type NumberingMode,
+} from "./figures";
+
+// F7.5 — Setter dinâmico das opções de paginação (margens, gap…). O
+// EditorPage chama isto em useEffect quando margens mudam para fazer o
+// conteúdo se reorganizar automaticamente.
+export {
+  setPaginationOptions,
+  type PaginationOptions,
+} from "./pagination";
+
+// F10 — Biblioteca de blocos reutilizáveis (texto pericial padronizado).
+export {
+  BLOCK_CATEGORIES,
+  BUILTIN_BLOCKS,
+  deleteCustomBlock,
+  findBlock as findBlockDef,
+  listAllBlocks,
+  listBlocksByCategory,
+  loadCustomBlocks,
+  saveCustomBlock,
+  type BlockCategory,
+  type BlockDefinition,
+} from "./blocks";
+
+// F7 — Tabelas-modelo periciais + extração/numeração de tabelas.
+export {
+  TABLE_TEMPLATES,
+  TABLE_TEMPLATES_BY_ID,
+  findTableTemplate,
+  extractTables,
+  buildTableList,
+  type TableTemplateDefinition,
+  type TableEntry,
+  type NumberedTableEntry,
+} from "./tables";
+
+// F4 — Sistema de estilos documentais (12+ estilos).
+export {
+  LAUDO_STYLES,
+  LAUDO_STYLES_BY_ID,
+  laudoStylesByCategory,
+  findLaudoStyle,
+  LaudoStyleAttribute,
+  applyLaudoStyle,
+  removeLaudoStyle,
+  getCurrentLaudoStyle,
+  type LaudoStyleId,
+  type LaudoStyleTarget,
+  type LaudoStyleDefinition,
+} from "./styles";
+
+// F4 — Sumário / outline / numeração automática de seções.
+export {
+  extractOutline,
+  numberOutline,
+  type OutlineEntry,
+  type NumberedOutlineEntry,
+} from "./sections";
+
+// F8 — Comments service + snapshots service.
+export {
+  createComment,
+  addComment,
+  updateComment,
+  resolveComment,
+  unresolveComment,
+  deleteComment,
+  addReply,
+  countActiveComments,
+  extractCommentAnchors,
+  type CommentAnchorInfo,
+} from "./comments";
+export {
+  MAX_SNAPSHOTS,
+  createSnapshot,
+  pushSnapshot,
+  deleteSnapshot,
+} from "./snapshots";
+
+// F5 — Campos automáticos `{{var}}` + resolver + catálogo.
+export {
+  LAUDO_FIELDS,
+  LAUDO_FIELDS_BY_KEY,
+  FIELD_GROUPS,
+  isKnownFieldKey,
+  findField,
+  fieldsByGroup,
+  requiredFields,
+  groupLabel,
+  resolveFieldValue,
+  resolveDefinition,
+  resolveAllFields,
+  findMissingRequiredFields,
+  FieldPlaceholder,
+  type LaudoFieldGroup,
+  type LaudoFieldSource,
+  type LaudoFieldDefinition,
+  type FieldResolveContext,
+} from "./fields";

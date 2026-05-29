@@ -10,24 +10,19 @@
  *   6. Dados    — metadata of the SicroDoc envelope (id, template, timestamps).
  */
 
-import { useEffect, useMemo, useState } from "react";
-import type { JSONContent } from "@tiptap/core";
+import { useEffect, useState } from "react";
 import type { Editor } from "@tiptap/react";
 import {
   AlertTriangle,
   Boxes,
   Info,
-  LayoutTemplate,
   ListTree,
-  ScrollText,
-  Sparkles,
 } from "lucide-react";
 import {
   findInstitutionalTemplate,
   formatCm,
   marginsInCm,
   resolveEffectiveMargins,
-  validateSicroDoc,
   type DocumentWarning,
   type SicroDoc,
 } from "../document-engine";
@@ -36,6 +31,7 @@ import { useWorkspaceStore } from "@stores/workspaceStore";
 import { formatDateTime } from "@core/formatters";
 import { toSicroError } from "@core/errors";
 import { EvidencePanel } from "./evidence/EvidencePanel";
+import { NavigationPanel } from "./NavigationPanel";
 import styles from "./Inspector.module.css";
 
 interface InspectorProps {
@@ -48,13 +44,15 @@ interface InspectorProps {
   laudoId?: string | null;
 }
 
-type Tab =
-  | "outline"
-  | "validation"
-  | "evidence"
-  | "header"
-  | "page"
-  | "meta";
+/**
+ * F4.1 — Inspector lateral simplificado a 2 abas: foco em PROVAS.
+ *
+ * Validações, Estilos, Cabeçalho, Página e Dados saíram daqui e viram
+ * popovers acessíveis pela barra superior (`EditorMenuBar`). Sem esse
+ * corte, abas excedentes simplesmente saíam de tela (sem scroll
+ * horizontal) e o perito perdia acesso a painéis antigos.
+ */
+type Tab = "outline" | "evidence";
 
 export function Inspector({
   doc,
@@ -62,24 +60,18 @@ export function Inspector({
   workspacePath = null,
   laudoId = null,
 }: InspectorProps) {
-  const [tab, setTab] = useState<Tab>("validation");
+  // F4.1 — `doc` permanece na API por compatibilidade do caller, mas o
+  // Inspector agora só lida com Estrutura + Evidências (que dependem do
+  // `editor` para extrair outline e do `workspacePath`/`laudoId` para
+  // inserir evidências). Painéis que liam `doc` (validação/cabeçalho/
+  // página/dados) migraram para a barra superior — `EditorMenuBar`.
+  void doc;
+  const [tab, setTab] = useState<Tab>("outline");
   const activeOccurrence = useWorkspaceStore((s) => s.activeOccurrence);
-
-  const warnings = useMemo<DocumentWarning[]>(
-    () => (doc ? validateSicroDoc(doc) : []),
-    [doc],
-  );
-  const outline = useMemo(() => (doc ? buildOutline(doc.content) : []), [doc]);
 
   return (
     <aside className={styles.inspector} aria-label="Inspetor do laudo">
       <div className={styles.tabs} role="tablist">
-        <TabButton
-          active={tab === "validation"}
-          onClick={() => setTab("validation")}
-          icon={<AlertTriangle size={14} />}
-          label={`Validações (${warnings.length})`}
-        />
         <TabButton
           active={tab === "outline"}
           onClick={() => setTab("outline")}
@@ -92,31 +84,11 @@ export function Inspector({
           icon={<Boxes size={14} />}
           label="Evidências"
         />
-        <TabButton
-          active={tab === "header"}
-          onClick={() => setTab("header")}
-          icon={<ScrollText size={14} />}
-          label="Cabeçalho"
-        />
-        <TabButton
-          active={tab === "page"}
-          onClick={() => setTab("page")}
-          icon={<LayoutTemplate size={14} />}
-          label="Página"
-        />
-        <TabButton
-          active={tab === "meta"}
-          onClick={() => setTab("meta")}
-          icon={<Sparkles size={14} />}
-          label="Dados"
-        />
       </div>
 
       <div className={styles.body}>
-        {tab === "validation" && (
-          <ValidationPanel warnings={warnings} hasDoc={!!doc} />
-        )}
-        {tab === "outline" && <OutlinePanel items={outline} />}
+        {/* F4 — NavigationPanel: outline clicável + numeração automática. */}
+        {tab === "outline" && <NavigationPanel editor={editor ?? null} />}
         {tab === "evidence" && (
           <EvidencePanel
             editor={editor}
@@ -125,9 +97,6 @@ export function Inspector({
             occurrence={activeOccurrence}
           />
         )}
-        {tab === "header" && <HeaderPanel doc={doc} />}
-        {tab === "page" && <PagePanel doc={doc} />}
-        {tab === "meta" && <MetaPanel doc={doc} />}
       </div>
     </aside>
   );
@@ -159,7 +128,13 @@ function TabButton({
   );
 }
 
-function ValidationPanel({
+/**
+ * F4.1 — `ValidationPanel`, `HeaderPanel`, `PagePanel`, `MetaPanel`
+ * agora são exportados para que a barra superior do laudo possa
+ * renderizá-los dentro de popovers. O Inspector lateral, F4.1+, foca
+ * em provas: só "Estrutura" + "Evidências".
+ */
+export function ValidationPanel({
   warnings,
   hasDoc,
 }: {
@@ -173,73 +148,168 @@ function ValidationPanel({
     return (
       <>
         <h3 className={styles.sectionTitle}>Validações</h3>
-        <p className={styles.empty}>Nenhum alerta. O laudo passa nas verificações do Spike B.</p>
+        <p className={styles.empty}>
+          ✓ Nenhum alerta. O laudo passa em todas as verificações.
+        </p>
       </>
     );
   }
+
+  // F9 — Agrupa por categoria + ordena por severidade.
+  const byCat: Record<string, DocumentWarning[]> = {};
+  for (const w of warnings) {
+    const k = w.category ?? "outros";
+    if (!byCat[k]) byCat[k] = [];
+    byCat[k].push(w);
+  }
+  // Ordem visual das categorias (mais importante primeiro).
+  const order: Array<string> = [
+    "estrutura",
+    "conteudo",
+    "campos",
+    "evidencia",
+    "revisao",
+    "finalizacao",
+    "outros",
+  ];
+  const sevRank = (s: DocumentWarning["severity"]): number =>
+    s === "error" ? 0 : s === "warning" ? 1 : 2;
+
+  const errorCount = warnings.filter((w) => w.severity === "error").length;
+  const warnCount = warnings.filter((w) => w.severity === "warning").length;
+  const infoCount = warnings.filter((w) => w.severity === "info").length;
+
   return (
     <>
       <h3 className={styles.sectionTitle}>Validações</h3>
-      <ul className={styles.warningList}>
-        {warnings.map((w) => (
-          <li
-            key={w.id}
-            className={`${styles.warning} ${w.severity === "info" ? styles.info : ""}`}
-          >
-            <span
-              className={styles.warningMessage}
-              style={{ display: "inline-flex", gap: 6, alignItems: "center" }}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          fontSize: 11,
+          marginBottom: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        {errorCount > 0 && (
+          <span style={{ color: "#b91c1c", fontWeight: 600 }}>
+            ● {errorCount} erro{errorCount === 1 ? "" : "s"}
+          </span>
+        )}
+        {warnCount > 0 && (
+          <span style={{ color: "#d97706", fontWeight: 600 }}>
+            ● {warnCount} alerta{warnCount === 1 ? "" : "s"}
+          </span>
+        )}
+        {infoCount > 0 && (
+          <span style={{ color: "#0369a1" }}>
+            ● {infoCount} info
+          </span>
+        )}
+      </div>
+      {order
+        .map((k) => ({ k, list: byCat[k] ?? [] }))
+        .filter(({ list }) => list.length > 0)
+        .map(({ k: cat, list }) => (
+          <div key={cat} style={{ marginBottom: 10 }}>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                color: "var(--sicro-fg-dim)",
+                marginBottom: 4,
+                paddingBottom: 2,
+                borderBottom: "1px solid var(--sicro-divider)",
+              }}
             >
-              {w.severity === "info" ? <Info size={12} /> : <AlertTriangle size={12} />}
-              {w.message}
-            </span>
-            {w.hint && <span className={styles.warningHint}>{w.hint}</span>}
-          </li>
-        ))}
-      </ul>
-    </>
-  );
-}
-
-interface OutlineItem {
-  level: 1 | 2 | 3;
-  text: string;
-}
-
-function OutlinePanel({ items }: { items: OutlineItem[] }) {
-  if (items.length === 0) {
-    return <p className={styles.empty}>Nenhuma seção declarada ainda.</p>;
-  }
-  return (
-    <>
-      <h3 className={styles.sectionTitle}>Estrutura</h3>
-      <div className={styles.outlineList}>
-        {items.map((item, idx) => (
-          <div
-            key={idx}
-            className={`${styles.outlineItem} ${
-              item.level === 1
-                ? styles.outlineLevel1
-                : item.level === 2
-                  ? styles.outlineLevel2
-                  : styles.outlineLevel3
-            }`}
-          >
-            {item.text || "(sem título)"}
+              {categoryLabel(cat)} ({list.length})
+            </div>
+            <ul className={styles.warningList}>
+              {list
+                .sort((a, b) => sevRank(a.severity) - sevRank(b.severity))
+                .map((w) => (
+                  <li
+                    key={w.id}
+                    className={`${styles.warning} ${
+                      w.severity === "info" ? styles.info : ""
+                    }`}
+                    style={
+                      w.severity === "error"
+                        ? {
+                            borderLeftColor: "#b91c1c",
+                            background: "rgba(220, 38, 38, 0.06)",
+                          }
+                        : undefined
+                    }
+                  >
+                    <span
+                      className={styles.warningMessage}
+                      style={{
+                        display: "inline-flex",
+                        gap: 6,
+                        alignItems: "center",
+                      }}
+                    >
+                      {w.severity === "info" ? (
+                        <Info size={12} />
+                      ) : (
+                        <AlertTriangle size={12} />
+                      )}
+                      {w.message}
+                    </span>
+                    {w.hint && (
+                      <span className={styles.warningHint}>{w.hint}</span>
+                    )}
+                  </li>
+                ))}
+            </ul>
           </div>
         ))}
-      </div>
     </>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Header configuration panel (MVP 2 ajuste runtime)
+function categoryLabel(cat: string): string {
+  switch (cat) {
+    case "estrutura":
+      return "Estrutura";
+    case "conteudo":
+      return "Conteúdo";
+    case "campos":
+      return "Campos automáticos";
+    case "evidencia":
+      return "Evidências";
+    case "revisao":
+      return "Revisão";
+    case "finalizacao":
+      return "Finalização";
+    default:
+      return "Outros";
+  }
+}
 
-function HeaderPanel({ doc }: { doc: SicroDoc | null }) {
+// NOTA F4: `OutlinePanel` legado foi substituído por `NavigationPanel`
+// (clicável, numerado, reativo ao cursor). Helper `buildOutline` também
+// foi removido — `extractOutline` em `document-engine/sections` é o
+// substituto canônico.
+
+// ---------------------------------------------------------------------------
+// Header configuration panel (MVP 2 ajuste runtime + N13)
+
+export function HeaderPanel({ doc }: { doc: SicroDoc | null }) {
   const activeWorkspacePath = useWorkspaceStore((s) => s.activeWorkspacePath);
   const activeOccurrence = useWorkspaceStore((s) => s.activeOccurrence);
   const updateMetadata = useLaudoStore((s) => s.updateMetadata);
+  // N13 — Controles do cabeçalho Word-style. O painel agora resume o
+  // estado do novo header (enabled/altura) e o que aparece no editor;
+  // edição do conteúdo continua acontecendo INLINE via double-click ou
+  // botão "Editar no editor" abaixo (que ativa o modo no laudoStore).
+  const setEditingRegion = useLaudoStore((s) => s.setEditingRegion);
+  const setHeader = useLaudoStore((s) => s.setHeader);
+  const headerEnabled = doc?.header?.enabled ?? false;
+  const headerHeightCm = doc?.layout?.header_height_cm ?? 2.5;
 
   // Local drafts for the editable metadata fields. Sync to `doc.metadata`
   // whenever the underlying laudo changes.
@@ -277,9 +347,79 @@ function HeaderPanel({ doc }: { doc: SicroDoc | null }) {
     }
   };
 
+  const toggleHeader = async () => {
+    if (!activeWorkspacePath || !doc?.header) return;
+    try {
+      await setHeader(activeWorkspacePath, {
+        ...doc.header,
+        enabled: !doc.header.enabled,
+      });
+    } catch (err) {
+      setFeedback(`Falha: ${toSicroError(err).message}`);
+    }
+  };
+
+  const startEditingHeader = () => {
+    setEditingRegion("header");
+  };
+
   return (
     <>
-      <h3 className={styles.sectionTitle}>Cabeçalho institucional</h3>
+      <h3 className={styles.sectionTitle}>Cabeçalho</h3>
+
+      {/* N13 — Bloco "Cabeçalho Word-style" */}
+      <div className={styles.headerStateBlock}>
+        <div className={styles.headerStateRow}>
+          <span className={styles.headerStateLabel}>Status</span>
+          <span
+            className={
+              headerEnabled
+                ? styles.headerBadgeOn
+                : styles.headerBadgeOff
+            }
+          >
+            {headerEnabled ? "Ativado" : "Desativado"}
+          </span>
+        </div>
+        <div className={styles.headerStateRow}>
+          <span className={styles.headerStateLabel}>Altura</span>
+          <span className={styles.headerStateValue}>
+            {headerHeightCm.toFixed(1)} cm
+          </span>
+        </div>
+        <div className={styles.headerStateActions}>
+          <button
+            type="button"
+            className={styles.headerBtnSecondary}
+            onClick={toggleHeader}
+            title={
+              headerEnabled
+                ? "Desativa o cabeçalho (conteúdo permanece salvo)"
+                : "Ativa o cabeçalho com o conteúdo já configurado"
+            }
+          >
+            {headerEnabled ? "Desativar" : "Ativar"}
+          </button>
+          <button
+            type="button"
+            className={styles.headerBtnPrimary}
+            onClick={startEditingHeader}
+            disabled={!headerEnabled}
+            title="Entra em modo de edição do cabeçalho (mesmo que duplo clique no laudo)"
+          >
+            Editar no editor
+          </button>
+        </div>
+        <p className={styles.headerStateHint}>
+          Conteúdo do cabeçalho aplica em <strong>todas as páginas</strong>.
+          Para editar o texto, dê duplo clique no topo de qualquer página
+          ou use o botão acima.
+        </p>
+      </div>
+
+      <h4 className={styles.subSectionTitle}>
+        Metadados do laudo (usados pelos campos automáticos)
+      </h4>
       <p
         style={{
           fontSize: "var(--text-xs)",
@@ -288,9 +428,8 @@ function HeaderPanel({ doc }: { doc: SicroDoc | null }) {
           marginTop: 0,
         }}
       >
-        Configuração visual do laudo (template <strong>PCA Padrão v1</strong>).
-        Estes campos não fazem parte do conteúdo editável — eles parametrizam
-        o cabeçalho desenhado pelo SICRO.
+        Estes campos alimentam <code>{"{{numero_laudo}}"}</code>,{" "}
+        <code>{"{{setor}}"}</code> etc. dentro do cabeçalho e do corpo.
       </p>
 
       <div className={styles.headerField}>
@@ -362,7 +501,7 @@ function labelOf(key: "numero_laudo" | "setor"): string {
 // ---------------------------------------------------------------------------
 // Page (margins) panel — MVP 2 ajuste runtime 1.2
 
-function PagePanel({ doc }: { doc: SicroDoc | null }) {
+export function PagePanel({ doc }: { doc: SicroDoc | null }) {
   const activeWorkspacePath = useWorkspaceStore((s) => s.activeWorkspacePath);
   const updateLayout = useLaudoStore((s) => s.updateLayout);
 
@@ -448,10 +587,31 @@ function PagePanel({ doc }: { doc: SicroDoc | null }) {
   };
 
   const isOverride = !!doc.layout?.page?.margins;
+  const orientation: "portrait" | "landscape" =
+    doc.layout?.orientation === "landscape" ? "landscape" : "portrait";
+
+  const handleOrientation = async (next: "portrait" | "landscape") => {
+    if (next === orientation) return;
+    if (!activeWorkspacePath) return;
+    try {
+      // updateLayout faz merge top-level; passamos orientation diretamente.
+      await updateLayout(activeWorkspacePath, { orientation: next });
+      setFeedback(
+        next === "landscape"
+          ? "Orientação alterada para paisagem."
+          : "Orientação alterada para retrato.",
+      );
+      setTimeout(() => setFeedback(null), 2500);
+    } catch (err) {
+      setFeedback(`Falha: ${toSicroError(err).message}`);
+    }
+  };
 
   return (
     <>
-      <h3 className={styles.sectionTitle}>Página (A4 retrato)</h3>
+      <h3 className={styles.sectionTitle}>
+        Página (A4 {orientation === "landscape" ? "paisagem" : "retrato"})
+      </h3>
       <p
         style={{
           fontSize: "var(--text-xs)",
@@ -464,6 +624,28 @@ function PagePanel({ doc }: { doc: SicroDoc | null }) {
         valores imediatamente. PDF e DOCX (via `@page` e `PageMargin`) usam os
         mesmos valores ao exportar.
       </p>
+
+      {/* F3 — Toggle orientação retrato/paisagem. */}
+      <div className={styles.orientationGroup} role="radiogroup" aria-label="Orientação">
+        <button
+          type="button"
+          role="radio"
+          aria-checked={orientation === "portrait"}
+          className={`${styles.orientationBtn} ${orientation === "portrait" ? styles.orientationBtnActive : ""}`}
+          onClick={() => void handleOrientation("portrait")}
+        >
+          Retrato
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={orientation === "landscape"}
+          className={`${styles.orientationBtn} ${orientation === "landscape" ? styles.orientationBtnActive : ""}`}
+          onClick={() => void handleOrientation("landscape")}
+        >
+          Paisagem
+        </button>
+      </div>
 
       <div className={styles.marginGrid}>
         <MarginField
@@ -593,7 +775,7 @@ function parseCmInput(raw: string): number | null {
   return unit === "mm" ? n / 10 : n;
 }
 
-function MetaPanel({ doc }: { doc: SicroDoc | null }) {
+export function MetaPanel({ doc }: { doc: SicroDoc | null }) {
   if (!doc) {
     return <p className={styles.empty}>Abra um laudo para ver os metadados.</p>;
   }
@@ -618,24 +800,4 @@ function MetaPanel({ doc }: { doc: SicroDoc | null }) {
   );
 }
 
-function buildOutline(content: JSONContent): OutlineItem[] {
-  const items: OutlineItem[] = [];
-
-  const walk = (node: JSONContent) => {
-    if (node.type === "heading") {
-      const level = Math.min(3, Math.max(1, (node.attrs?.level as number) ?? 1)) as
-        | 1
-        | 2
-        | 3;
-      let text = "";
-      for (const c of node.content ?? []) {
-        if (c.type === "text" && typeof c.text === "string") text += c.text;
-      }
-      items.push({ level, text: text.trim() });
-    }
-    for (const c of node.content ?? []) walk(c);
-  };
-
-  walk(content);
-  return items;
-}
+// F4 — `buildOutline` removido. Use `extractOutline` em `document-engine/sections`.

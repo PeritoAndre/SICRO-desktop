@@ -7,6 +7,7 @@
 import type { BackendAdjustments } from "@domain/image_analysis";
 import {
   CURRENT_SCHEMA_VERSION,
+  type ProcessingOp,
   type SicroImageCanvas,
   type SicroImageDoc,
   type SicroImageLayer,
@@ -78,8 +79,14 @@ export function coerceSicroImage(raw: unknown): SicroImageDoc {
     : [];
   const scale = coerceScale(o.scale);
   const exports = Array.isArray(o.exports) ? o.exports : [];
+  // G12.10 — processing_stack agora é tipado. Pré-G12 docs vinham com
+  // unknown[]; mantemos compat coercando shape mínima.
   const processing_stack = Array.isArray(o.processing_stack)
-    ? o.processing_stack
+    ? (o.processing_stack as unknown[])
+        .filter((op): op is Record<string, unknown> =>
+          typeof op === "object" && op !== null,
+        )
+        .map((op) => coerceProcessingOp(op))
     : [];
 
   return {
@@ -194,4 +201,21 @@ function numberField(o: Record<string, unknown>, key: string): number | null {
 function boolField(o: Record<string, unknown>, key: string): boolean {
   const v = o[key];
   return typeof v === "boolean" ? v : false;
+}
+
+/** G12.10 — coerce a ProcessingOp with safe defaults. */
+function coerceProcessingOp(o: Record<string, unknown>): ProcessingOp {
+  return {
+    id:
+      (typeof o.id === "string" && o.id) ||
+      `op-${Math.random().toString(36).slice(2, 10)}`,
+    kind: (stringField(o, "kind") as ProcessingOp["kind"]) ?? "blur_gaussian",
+    enabled: typeof o.enabled === "boolean" ? o.enabled : true,
+    params:
+      typeof o.params === "object" && o.params !== null
+        ? (o.params as Record<string, unknown>)
+        : {},
+    notes: stringField(o, "notes") ?? undefined,
+    created_at: stringField(o, "created_at") ?? new Date().toISOString(),
+  };
 }

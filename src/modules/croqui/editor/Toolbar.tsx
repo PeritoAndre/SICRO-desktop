@@ -25,6 +25,7 @@ import {
   Bike,
   Bus,
   Car,
+  Circle,
   CornerDownRight,
   Crosshair,
   FileImage,
@@ -107,6 +108,8 @@ const CATEGORIES: CategoryDef[] = [
       { key: "road_highway", label: "Rodovia", icon: Route },
       { key: "road_dirt", label: "Estrada de terra", icon: Route },
       { key: "road_parking", label: "Estacionamento", icon: Square },
+      // Road Engine 2.0 Ciclo 2 — rotatória primitiva (single-click insert).
+      { key: "roundabout", label: "Rotatória", icon: Circle },
     ],
   },
   {
@@ -203,6 +206,14 @@ interface Props {
   onPickFromDossie: () => void;
   /** MVP 9 Round 4 — open the drone pre-processing wizard. */
   onImportDrone?: () => void;
+  /** MVP 10 — open the OSM road import wizard. */
+  onImportOsm?: () => void;
+  /**
+   * Fase H.3 — insere fixture de teste do Python Parity Engine
+   * (rotatória + 4 vias). Força `road_engine_version: "parity"` no doc.
+   * Botão experimental, só aparece se o handler for fornecido.
+   */
+  onInsertParityDemo?: () => void;
   /** MVP 9 Round 5 — background framing helpers. */
   onCenterBackground?: () => void;
   onFitBackground?: () => void;
@@ -238,6 +249,8 @@ export function Toolbar({
   onImportBackground,
   onPickFromDossie,
   onImportDrone,
+  onImportOsm,
+  onInsertParityDemo,
   onCenterBackground,
   onFitBackground,
   onResetBackgroundRotation,
@@ -439,6 +452,26 @@ export function Toolbar({
             title="Abre o assistente de drone: correção radial de lente + crop + sidecar JSON antes de usar como fundo"
           >
             <FileImage size={12} /> Importar Drone…
+          </button>
+        )}
+        {onImportOsm && (
+          <button
+            type="button"
+            className={styles.actionBtn}
+            onClick={onImportOsm}
+            title="Abre o mapa OSM para localizar o sinistro e importar as vias da região como RoadObjects editáveis"
+          >
+            <MapPin size={12} /> Importar OSM…
+          </button>
+        )}
+        {onInsertParityDemo && (
+          <button
+            type="button"
+            className={styles.actionBtn}
+            onClick={onInsertParityDemo}
+            title="Fase H.3 — Insere uma fixture de teste (rotatória + 4 vias arteriais) usando o Python Parity Engine. Força road_engine_version: 'parity' no doc."
+          >
+            <MapPin size={12} /> Inserir Demo Parity
           </button>
         )}
         {hasBackground && (

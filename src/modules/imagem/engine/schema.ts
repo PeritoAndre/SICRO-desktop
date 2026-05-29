@@ -13,7 +13,7 @@ import type {
   ImageSourceKind,
 } from "@domain/image_analysis";
 
-export const CURRENT_SCHEMA_VERSION = "0.1";
+export const CURRENT_SCHEMA_VERSION = "0.2";
 
 export interface SicroImagePoint {
   x: number;
@@ -72,7 +72,11 @@ export type SicroAnnotationKind =
   | "numbered_marker"
   | "point"
   | "measurement"
-  | "redaction";
+  | "redaction"
+  // G12.14 — Anotações novas no schema 0.2
+  | "polygon"
+  | "angle"
+  | "freehand";
 
 export interface SicroAnnotation {
   id: string;
@@ -101,6 +105,75 @@ export interface SicroAnnotation {
   visible?: boolean;
   locked?: boolean;
   created_at: string;
+  /**
+   * G12 — Lista de pontos para polygon/freehand/angle. Coordenadas
+   * absolutas em px da imagem original.
+   * - polygon: 3+ pontos formando contorno fechado (área + perímetro).
+   * - angle: exatamente 3 pontos (vértice é o do meio).
+   * - freehand: N pontos amostrados do mouse drag.
+   */
+  points?: SicroImagePoint[];
+  /**
+   * G12 — Pré-computado pelo frontend quando há `scale` calibrada.
+   * Usado para evitar recálculo a cada render.
+   */
+  measured_value?: {
+    /** "distance_m" / "area_m2" / "angle_deg" / "perimeter_m" */
+    kind: string;
+    value: number;
+    /** unidade (m, m², °) — display only */
+    unit: string;
+  };
+}
+
+/**
+ * G12.10 — Pipeline de processamento NÃO destrutivo.
+ *
+ * Cada `ProcessingOp` representa uma operação na pilha:
+ *   - `enabled = false` mantém na história mas não aplica.
+ *   - reordenável via drag.
+ *   - parâmetros editáveis a qualquer momento.
+ *
+ * O backend é chamado com o array desabilitados-filtrados quando
+ * o usuário pede preview ou export.
+ */
+export type ProcessingOpKind =
+  | "edge_sobel"
+  | "edge_laplacian"
+  | "edge_canny"
+  | "blur_gaussian"
+  | "blur_median"
+  | "blur_bilateral"
+  | "clahe"
+  | "histogram_equalize"
+  | "auto_levels"
+  | "white_balance_gray_world"
+  | "dilate"
+  | "erode"
+  | "open"
+  | "close"
+  | "unsharp_mask"
+  | "threshold"
+  | "pixelize"
+  | "perspective"
+  // Geométricas
+  | "rotate_90_cw"
+  | "rotate_90_ccw"
+  | "rotate_180"
+  | "flip_horizontal"
+  | "flip_vertical"
+  | "crop"
+  | "resize";
+
+export interface ProcessingOp {
+  id: string;
+  kind: ProcessingOpKind;
+  enabled: boolean;
+  /** Parâmetros específicos da operação (sigma, threshold, radius, etc.). */
+  params: Record<string, unknown>;
+  /** Comentário do perito sobre por que aplicou (audit). */
+  notes?: string;
+  created_at: string;
 }
 
 export interface SicroImageDoc {
@@ -111,7 +184,8 @@ export interface SicroImageDoc {
   source: SicroImageSource;
   canvas: SicroImageCanvas;
   view_adjustments: BackendAdjustments;
-  processing_stack: unknown[]; // reserved for MVP 8 (Sobel/CLAHE/etc)
+  /** G12.10 — pilha de operações não-destrutivas (filtros forenses). */
+  processing_stack: ProcessingOp[];
   layers: SicroImageLayer[];
   annotations: SicroAnnotation[];
   measurements: SicroAnnotation[];

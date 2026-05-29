@@ -90,8 +90,15 @@ pub fn apply_adjustments(img: &mut RgbaImage, adj: &BackendAdjustments) {
 
 /// Apply one geometric operation, returning a new image (some operations
 /// can't be done in place because they change dimensions).
+///
+/// G12 — agora também despacha para os filtros forenses adicionados ao
+/// enum `BackendOperation`. Filtros pesados (CLAHE, Bilateral, Median
+/// com raio grande) podem demorar em imagens grandes; o caller deve
+/// rodar fora do thread principal Tauri.
 pub fn apply_operation(img: RgbaImage, op: &BackendOperation) -> RgbaImage {
+    use super::filters;
     match op {
+        // -- Geometric (MVP 7)
         BackendOperation::Rotate90Cw => imageops::rotate90(&img),
         BackendOperation::Rotate90Ccw => imageops::rotate270(&img),
         BackendOperation::Rotate180 => imageops::rotate180(&img),
@@ -109,6 +116,83 @@ pub fn apply_operation(img: RgbaImage, op: &BackendOperation) -> RgbaImage {
             (*height).max(1),
             imageops::FilterType::Lanczos3,
         ),
+
+        // -- G12.1 Edge detection
+        BackendOperation::EdgeSobel { strength } => {
+            filters::edges::sobel(&img, *strength)
+        }
+        BackendOperation::EdgeLaplacian { strength } => {
+            filters::edges::laplacian(&img, *strength)
+        }
+        BackendOperation::EdgeCanny {
+            low_threshold,
+            high_threshold,
+        } => filters::edges::canny(&img, *low_threshold, *high_threshold),
+
+        // -- G12.2 Blur/denoise
+        BackendOperation::BlurGaussian { sigma } => {
+            filters::blur::gaussian(&img, *sigma)
+        }
+        BackendOperation::BlurMedian { radius } => {
+            filters::blur::median(&img, *radius)
+        }
+        BackendOperation::BlurBilateral {
+            sigma_space,
+            sigma_color,
+        } => filters::blur::bilateral(&img, *sigma_space, *sigma_color),
+
+        // -- G12.3 Enhancement
+        BackendOperation::Clahe {
+            tile_size,
+            clip_limit,
+        } => filters::enhancement::clahe(&img, *tile_size, *clip_limit),
+        BackendOperation::HistogramEqualize => {
+            filters::enhancement::histogram_equalize(&img)
+        }
+        BackendOperation::AutoLevels {
+            percentile_low,
+            percentile_high,
+        } => filters::enhancement::auto_levels(&img, *percentile_low, *percentile_high),
+        BackendOperation::WhiteBalanceGrayWorld => {
+            filters::enhancement::white_balance_gray_world(&img)
+        }
+
+        // -- G12.4 Morphology
+        BackendOperation::Dilate { radius } => {
+            filters::morphology::dilate(&img, *radius)
+        }
+        BackendOperation::Erode { radius } => {
+            filters::morphology::erode(&img, *radius)
+        }
+        BackendOperation::Open { radius } => filters::morphology::open(&img, *radius),
+        BackendOperation::Close { radius } => filters::morphology::close(&img, *radius),
+
+        // -- G12.6 Perspective
+        BackendOperation::Perspective {
+            src,
+            dst,
+            output_width,
+            output_height,
+        } => filters::geometric::perspective_correct(
+            &img,
+            src,
+            dst,
+            *output_width,
+            *output_height,
+        ),
+
+        // -- G12 Extras
+        BackendOperation::UnsharpMask { sigma, amount } => {
+            filters::misc::unsharp_mask(&img, *sigma, *amount)
+        }
+        BackendOperation::Threshold { value } => filters::misc::threshold(&img, *value),
+        BackendOperation::Pixelize {
+            x,
+            y,
+            width,
+            height,
+            block_size,
+        } => filters::misc::pixelize_region(&img, *x, *y, *width, *height, *block_size),
     }
 }
 

@@ -104,3 +104,85 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ---------------------------------------------------------------------------
+ * F2 — Cor de texto + marca-texto (ColorPickerBtn).
+ *
+ * Cada botão mostra o ícone (palette / highlighter) e abaixo uma faixa fina
+ * com a cor atualmente selecionada. Ao clicar, abre uma grade compacta de
+ * cores + um botão "Remover" para limpar a marca.
+ */
+.colorWrap {
+  position: relative;
+  display: inline-block;
+}
+
+.colorSwatch {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 4px;
+  height: 3px;
+  border-radius: 1.5px;
+  background: transparent;
+  pointer-events: none;
+}
+
+.colorMenu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  z-index: 50;
+  background: var(--sicro-surface-2);
+  border: 1px solid var(--sicro-border);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 132px;
+}
+
+.colorGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+}
+
+.colorChip {
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--t-fast);
+}
+.colorChip:hover {
+  transform: scale(1.08);
+  border-color: var(--sicro-fg, #e2e8f0);
+}
+
+.colorReset {
+  font-size: 11px;
+  font-family: inherit;
+  padding: 4px 6px;
+  background: transparent;
+  border: 1px solid var(--sicro-border);
+  border-radius: var(--radius-sm);
+  color: var(--sicro-fg-muted);
+  cursor: pointer;
+}
+.colorReset:hover {
+  background: var(--sicro-surface-3, #334155);
+  color: var(--sicro-fg);
+}
+
+/* Permite que o destaque criado pela extension Highlight apareça com o
+ * background correto dentro do editor. */
+:global(.sicro-highlight) {
+  padding: 0 2px;
+  border-radius: 2px;
+}

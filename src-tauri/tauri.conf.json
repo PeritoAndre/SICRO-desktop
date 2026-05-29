@@ -21,7 +21,8 @@
         "decorations": true,
         "fullscreen": false,
         "center": true,
-        "theme": "Dark"
+        "theme": "Dark",
+        "dragDropEnabled": true
       }
     ],
     "security": {

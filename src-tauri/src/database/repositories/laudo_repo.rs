@@ -91,6 +91,9 @@ fn row_to_laudo(row: &Row<'_>) -> rusqlite::Result<Laudo> {
             .ok_or(rusqlite::Error::InvalidQuery)?,
         last_export_pdf: parse_optional_dt(row.get::<_, Option<String>>("last_export_pdf")?),
         last_export_docx: parse_optional_dt(row.get::<_, Option<String>>("last_export_docx")?),
+        // H — populated by `list_laudos` command after DB read (lê
+        // `.sicrodoc` para extrair `finalization.signature.type`).
+        signature_type: None,
     })
 }
 

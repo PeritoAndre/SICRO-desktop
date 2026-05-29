@@ -33,6 +33,15 @@ impl Default for Integrity {
     }
 }
 
+/// URL default do SIGDOC para o estado do Amapá.
+///
+/// Endereço oficial do sistema de tramitação documental do Estado.
+/// O caminho `/login.jsf` é o entry point JSF (Java Server Faces) —
+/// abrir no entry point evita 404 em sessões frias.
+///
+/// Configurável por workspace via `manifest.json` (campo `sigdocs_url`).
+pub const DEFAULT_SIGDOCS_URL: &str = "https://sigdoc.ap.gov.br/login.jsf";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     pub format: String,
@@ -44,6 +53,11 @@ pub struct Manifest {
     pub app_version: String,
     pub database: String,
     pub integrity: Integrity,
+    /// I — URL do SIGDOCS configurável por workspace.
+    /// Se ausente/null/vazia, usa `DEFAULT_SIGDOCS_URL`.
+    /// Campo aditivo: workspaces antigos continuam abrindo (serde default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sigdocs_url: Option<String>,
 }
 
 impl Manifest {
@@ -59,6 +73,16 @@ impl Manifest {
             app_version: APP_VERSION.to_string(),
             database: SQLITE_FILENAME.to_string(),
             integrity: Integrity::default(),
+            sigdocs_url: None,
+        }
+    }
+
+    /// I — Resolve a URL efetiva do SIGDOCS — usa o campo do manifest se
+    /// definido, senão o default.
+    pub fn effective_sigdocs_url(&self) -> String {
+        match &self.sigdocs_url {
+            Some(url) if !url.trim().is_empty() => url.trim().to_string(),
+            _ => DEFAULT_SIGDOCS_URL.to_string(),
         }
     }
 

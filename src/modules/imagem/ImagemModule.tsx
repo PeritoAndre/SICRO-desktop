@@ -31,6 +31,8 @@ import type { VideoStoryboardFrame } from "@domain/video";
 import { useImagemStore } from "./store/imagemStore";
 import { ImageEditor } from "./editor/ImageEditor";
 import { assetUrl, formatDateTime } from "./editor/shared";
+import { useImageEditRoundtripStore } from "@stores/imageEditRoundtripStore";
+import { joinWorkspace } from "@modules/laudo/document-engine";
 import styles from "./ImagemModule.module.css";
 
 type PickerTab = "dossie" | "frames" | "file";
@@ -51,10 +53,70 @@ export function ImagemModule() {
   const [error, setError] = useState<string | null>(null);
   const [showPicker, setShowPicker] = useState(false);
 
+  // Pós-laudo S — Round-trip Laudo → Imagem.
+  //
+  // Quando o perito clicou "Editar" numa foto do laudo, o store de
+  // roundtrip foi setado com a source_relative_path da foto + workspace.
+  // Aqui detectamos isso e auto-criamos uma análise a partir desse path
+  // (uma vez só por roundtrip; o flag local evita re-disparar enquanto
+  // o store permanece "editing").
+  const roundtripState = useImageEditRoundtripStore((s) => s.state);
+  const roundtripRequest = useImageEditRoundtripStore((s) => s.request);
+  const [roundtripBootstrapped, setRoundtripBootstrapped] = useState(false);
+
   useEffect(() => {
     if (!workspacePath) return;
     void loadList(workspacePath);
   }, [workspacePath, loadList]);
+
+  useEffect(() => {
+    if (
+      roundtripState !== "editing" ||
+      !roundtripRequest ||
+      !workspacePath ||
+      roundtripBootstrapped ||
+      activeAnalysis // já tem análise aberta — não duplica
+    ) {
+      return;
+    }
+    // Marca antes do await pra evitar segunda invocação concorrente.
+    setRoundtripBootstrapped(true);
+    void (async () => {
+      try {
+        const absolutePath = joinWorkspace(
+          roundtripRequest.workspace_path,
+          roundtripRequest.source_relative_path,
+        );
+        const title = roundtripRequest.laudo_title
+          ? `Edição de foto — ${roundtripRequest.laudo_title}`
+          : `Edição de foto do laudo`;
+        const row = await createFromFile(workspacePath, {
+          source_path: absolutePath,
+          title,
+        });
+        await openAnalysis(workspacePath, row.id);
+      } catch (err) {
+        setError(
+          `Falha ao abrir foto vinda do laudo: ${toSicroError(err).message}`,
+        );
+        // Reset flag pra usuário poder tentar de novo via "Voltar".
+        setRoundtripBootstrapped(false);
+      }
+    })();
+  }, [
+    roundtripState,
+    roundtripRequest,
+    workspacePath,
+    roundtripBootstrapped,
+    activeAnalysis,
+    createFromFile,
+    openAnalysis,
+  ]);
+
+  // Resetar flag quando roundtrip terminar (state → idle).
+  useEffect(() => {
+    if (roundtripState === "idle") setRoundtripBootstrapped(false);
+  }, [roundtripState]);
 
   const handleOpen = useCallback(
     async (analysisId: string) => {

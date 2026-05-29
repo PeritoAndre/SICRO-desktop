@@ -63,6 +63,12 @@ pub struct Laudo {
     pub updated_at: DateTime<Utc>,
     pub last_export_pdf: Option<DateTime<Utc>>,
     pub last_export_docx: Option<DateTime<Utc>>,
+    /// H — Tipo de assinatura digital encontrada no `.sicrodoc` (se
+    /// existir). Populado pelo `list_laudos` em best-effort: lê
+    /// `finalization.signature.type` quando consegue, senão fica `None`.
+    /// Valores típicos: `"gov_br"`, `"A1"`, `"A3"`, `"mock"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signature_type: Option<String>,
 }
 
 /// Input for `create_laudo`.

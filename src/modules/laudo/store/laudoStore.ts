@@ -10,12 +10,26 @@ import { commands } from "@core/commands";
 import { toSicroError, type SicroError } from "@core/errors";
 import {
   coerceSicroDoc,
+  findInstitutionalTemplate,
   normalizeEvidenceSrcsForSave,
   resolveEvidenceSrcsForEditor,
+  seedHeaderContentFromInstitutionalTemplate,
   type SicroDoc,
+  type SicroDocComment,
+  type SicroDocFinalization,
+  type SicroDocHeader,
   type SicroDocLayout,
+  type SicroDocSnapshot,
+  type SicroDocStatus,
 } from "../document-engine";
 import type { Laudo, NewLaudoInput } from "@domain/laudo";
+
+/** N — Região do editor atualmente ativa (modelo Word-style).
+ *  `body` (default): typing edita o corpo do laudo, header é só visual
+ *  com placeholder. `header`: typing edita `doc.header.content`, body
+ *  fica esmaecido e não editável. Transição via double-click no header
+ *  ou botão na toolbar. */
+export type EditingRegion = "body" | "header";
 
 interface LaudoState {
   list: Laudo[];
@@ -24,6 +38,9 @@ interface LaudoState {
 
   currentLaudo: Laudo | null;
   currentDoc: SicroDoc | null;
+
+  /** N — Região ativa de edição. UI-only (não persiste). */
+  editingRegion: EditingRegion;
 
   lastError: SicroError | null;
 
@@ -65,6 +82,39 @@ interface LaudoState {
     workspacePath: string,
     patch: Partial<SicroDocLayout>,
   ) => Promise<Laudo>;
+  /**
+   * F8 — Replace `currentDoc.comments` and persist. UI normalmente passa
+   * a lista inteira já mutada via helpers em `comments/service`.
+   */
+  setComments: (
+    workspacePath: string,
+    next: SicroDocComment[],
+  ) => Promise<Laudo>;
+  /**
+   * F8 — Replace `currentDoc.snapshots` e persist (push + cap).
+   */
+  setSnapshots: (
+    workspacePath: string,
+    next: SicroDocSnapshot[],
+  ) => Promise<Laudo>;
+  /**
+   * F8/F9 — Define o status do laudo (rascunho/em_revisao/final).
+   * Quando `final`, `finalization` deve ser passado em paralelo.
+   */
+  setStatus: (
+    workspacePath: string,
+    next: SicroDocStatus,
+    finalization?: SicroDocFinalization | null,
+  ) => Promise<Laudo>;
+  /** N — Replace `currentDoc.header` e persistir. Chamado pela camada do
+   *  editor (debounced) quando o usuário edita o cabeçalho, e pelo botão
+   *  "Cabeçalho" da toolbar (toggle enabled). */
+  setHeader: (
+    workspacePath: string,
+    next: SicroDocHeader,
+  ) => Promise<Laudo>;
+  /** N — Switch UI-only entre regiões body/header. Não persiste. */
+  setEditingRegion: (region: EditingRegion) => void;
   clearCurrent: () => void;
   clearError: () => void;
 }
@@ -75,6 +125,7 @@ export const useLaudoStore = create<LaudoState>((set, get) => ({
   isMutating: false,
   currentLaudo: null,
   currentDoc: null,
+  editingRegion: "body",
   lastError: null,
 
   async loadList(workspacePath) {
@@ -145,12 +196,59 @@ export const useLaudoStore = create<LaudoState>((set, get) => ({
     try {
       const payload = await commands.readLaudo(workspacePath, laudoId);
       const raw = coerceSicroDoc(payload.doc);
+
+      // N12 — Migração suave de docs legados que tinham
+      // `institutional_template` setado mas não tinham o header
+      // Word-style ainda. Detecção: header existe (via coerceSicroDoc)
+      // mas content é o stub vazio E há template institucional. Se
+      // sim, semeia o header com brand_lines/subtitle/metadata e
+      // persiste. Próximas aberturas pulam essa branch.
+      let migratedDoc = raw;
+      const needsHeaderSeed =
+        !!raw.layout?.institutional_template &&
+        !!raw.header &&
+        isHeaderContentEmpty(raw.header.content);
+
+      if (needsHeaderSeed) {
+        const template = findInstitutionalTemplate(
+          raw.layout?.institutional_template,
+        );
+        const seeded = seedHeaderContentFromInstitutionalTemplate(
+          template,
+          raw.metadata ?? {},
+          // Occurrence não está disponível aqui (vive em workspaceStore);
+          // o seeder degrada graciosamente — fields que dependem dela
+          // simplesmente não aparecem no header migrado.
+          null,
+        );
+        const newHeader: SicroDocHeader = {
+          enabled: true,
+          content: seeded as JSONContent,
+        };
+        migratedDoc = {
+          ...raw,
+          header: newHeader,
+          updated_at: new Date().toISOString(),
+        };
+        // Persiste de forma síncrona para que próximas aberturas vejam o
+        // doc migrado. Se falhar, mantém o doc em memória mesmo assim.
+        try {
+          await commands.saveLaudo(workspacePath, laudoId, migratedDoc);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn("[N12] failed to persist seeded header", err);
+        }
+      }
+
       // Resolve any relative_path → convertFileSrc so figures/storyboard
       // frames display in the editor. The on-disk doc stays untouched
       // (see normalizeEvidenceSrcsForSave on the save path).
       const doc: SicroDoc = {
-        ...raw,
-        content: resolveEvidenceSrcsForEditor(raw.content, workspacePath),
+        ...migratedDoc,
+        content: resolveEvidenceSrcsForEditor(
+          migratedDoc.content,
+          workspacePath,
+        ),
       };
       set({
         currentLaudo: payload.laudo,
@@ -279,11 +377,117 @@ export const useLaudoStore = create<LaudoState>((set, get) => ({
     }
   },
 
+  async setComments(workspacePath, next) {
+    return patchAndSave(workspacePath, get, set, (doc) => ({
+      ...doc,
+      comments: next,
+    }));
+  },
+
+  async setSnapshots(workspacePath, next) {
+    return patchAndSave(workspacePath, get, set, (doc) => ({
+      ...doc,
+      snapshots: next,
+    }));
+  },
+
+  async setStatus(workspacePath, next, finalization) {
+    return patchAndSave(workspacePath, get, set, (doc) => ({
+      ...doc,
+      status: next,
+      finalization:
+        next === "final"
+          ? finalization ?? doc.finalization ?? undefined
+          : undefined,
+    }));
+  },
+
+  async setHeader(workspacePath, next) {
+    return patchAndSave(workspacePath, get, set, (doc) => ({
+      ...doc,
+      header: next,
+    }));
+  },
+
+  setEditingRegion(region) {
+    set({ editingRegion: region });
+  },
+
   clearCurrent() {
-    set({ currentLaudo: null, currentDoc: null });
+    set({ currentLaudo: null, currentDoc: null, editingRegion: "body" });
   },
 
   clearError() {
     set({ lastError: null });
   },
 }));
+
+/**
+ * N12 — True quando o conteúdo do header é o stub default (doc com 1
+ * único parágrafo vazio). Usado pra decidir se vale rodar a migração
+ * a partir do `institutional_template`.
+ */
+function isHeaderContentEmpty(content: JSONContent | undefined): boolean {
+  if (!content || content.type !== "doc") return true;
+  const blocks = content.content ?? [];
+  if (blocks.length === 0) return true;
+  if (blocks.length === 1) {
+    const first = blocks[0]!;
+    if (first.type === "paragraph") {
+      const inner = first.content ?? [];
+      if (inner.length === 0) return true;
+      // Parágrafo só com texto vazio também conta como vazio.
+      const allEmpty = inner.every(
+        (n) =>
+          n.type === "text" && (n.text === undefined || n.text.trim() === ""),
+      );
+      if (allEmpty) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * F8 — Helper genérico: aplica um patcher no `currentDoc` corrente e
+ * persiste o resultado via `save_laudo`. Compartilhado por setComments,
+ * setSnapshots e setStatus.
+ *
+ * Aceita o `set` da própria zustand (tipo bem permissivo) para evitar
+ * gambiarras de cast.
+ */
+async function patchAndSave(
+  workspacePath: string,
+  get: () => LaudoState,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  set: any,
+  patcher: (doc: SicroDoc) => SicroDoc,
+): Promise<Laudo> {
+  const current = get().currentLaudo;
+  const currentDoc = get().currentDoc;
+  if (!current || !currentDoc) {
+    throw new Error("no laudo currently open");
+  }
+  set({ isMutating: true, lastError: null });
+  try {
+    const nextDoc: SicroDoc = {
+      ...patcher(currentDoc),
+      updated_at: new Date().toISOString(),
+    };
+    const updatedRow = await commands.saveLaudo(
+      workspacePath,
+      current.id,
+      nextDoc,
+    );
+    set((s: LaudoState) => ({
+      list: s.list.map((l) => (l.id === updatedRow.id ? updatedRow : l)),
+      currentLaudo: updatedRow,
+      currentDoc: nextDoc,
+      isMutating: false,
+    }));
+    return updatedRow;
+  } catch (err) {
+    const e = toSicroError(err);
+    set({ isMutating: false, lastError: e });
+    throw e;
+  }
+}

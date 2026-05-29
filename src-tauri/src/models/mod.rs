@@ -29,8 +29,8 @@ pub use import::{
 };
 pub use image_analysis::{
     BackendAdjustments, BackendOperation, CreateImageAnalysisInput, ExportImageInput,
-    ImageAnalysis, ImageAssetBytes, ImageExport, ImageMetadata, ImageOperationLog,
-    ImageSourceKind, ImportLocalImageInput,
+    HashSet as ImageHashSet, ImageAnalysis, ImageAssetBytes, ImageExport, ImageHistogram,
+    ImageMetadata, ImageOperationLog, ImageSourceKind, ImportLocalImageInput, HistogramStats,
 };
 pub use laudo::{Laudo, LaudoDoc, LaudoStatus, NewLaudoInput};
 pub use registry::{

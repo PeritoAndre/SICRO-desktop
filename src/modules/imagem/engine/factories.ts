@@ -9,6 +9,7 @@
 import type {
   SicroAnnotation,
   SicroAnnotationKind,
+  SicroImagePoint,
 } from "./schema";
 
 const ANNOTATIONS_LAYER = "layer_annotations";
@@ -107,4 +108,109 @@ export function makeRedaction(
     stroke: "#000000",
     opacity: 1,
   };
+}
+
+// ---------------------------------------------------------------------------
+// G12.14 — Novos kinds: polygon, angle, freehand
+
+/**
+ * Polígono fechado (área + perímetro). Precisa ≥3 pontos.
+ * O ponto de ancoragem `(x, y)` é o primeiro vértice.
+ */
+export function makePolygon(points: SicroImagePoint[]): SicroAnnotation {
+  const first = points[0] ?? { x: 0, y: 0 };
+  return {
+    ...base("polygon", first.x, first.y),
+    points,
+    stroke: "#fb923c",
+    fill: "rgba(251, 146, 60, 0.10)",
+    stroke_width: 2,
+  };
+}
+
+/**
+ * Medida de ângulo formada por 3 pontos. O vértice é o do meio
+ * (`points[1]`); os outros dois definem os raios.
+ */
+export function makeAngle(
+  p1: SicroImagePoint,
+  vertex: SicroImagePoint,
+  p2: SicroImagePoint,
+): SicroAnnotation {
+  return {
+    ...base("angle", vertex.x, vertex.y),
+    points: [p1, vertex, p2],
+    stroke: "#a855f7",
+    stroke_width: 2,
+  };
+}
+
+/**
+ * Desenho à mão livre — amostra de pontos do mouse drag.
+ */
+export function makeFreehand(points: SicroImagePoint[]): SicroAnnotation {
+  const first = points[0] ?? { x: 0, y: 0 };
+  return {
+    ...base("freehand", first.x, first.y),
+    points,
+    stroke: "#facc15",
+    stroke_width: 2,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// G12.15 — Cálculos de medidas a partir das geometrias.
+
+/** Distância euclidiana em pixels. */
+export function distance(a: SicroImagePoint, b: SicroImagePoint): number {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+/** Área de polígono via Shoelace formula (sempre absoluto). */
+export function polygonArea(points: SicroImagePoint[]): number {
+  if (points.length < 3) return 0;
+  let area = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    if (!a || !b) continue;
+    area += a.x * b.y - b.x * a.y;
+  }
+  return Math.abs(area) / 2;
+}
+
+/** Perímetro de polígono fechado. */
+export function polygonPerimeter(points: SicroImagePoint[]): number {
+  if (points.length < 2) return 0;
+  let total = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    if (!a || !b) continue;
+    total += distance(a, b);
+  }
+  return total;
+}
+
+/**
+ * Ângulo em graus entre os raios (p1 - vertex) e (p2 - vertex).
+ * Resultado entre 0 e 180.
+ */
+export function angleDegrees(
+  p1: SicroImagePoint,
+  vertex: SicroImagePoint,
+  p2: SicroImagePoint,
+): number {
+  const v1x = p1.x - vertex.x;
+  const v1y = p1.y - vertex.y;
+  const v2x = p2.x - vertex.x;
+  const v2y = p2.y - vertex.y;
+  const dot = v1x * v2x + v1y * v2y;
+  const m1 = Math.sqrt(v1x * v1x + v1y * v1y);
+  const m2 = Math.sqrt(v2x * v2x + v2y * v2y);
+  if (m1 < 1e-6 || m2 < 1e-6) return 0;
+  const cos = Math.max(-1, Math.min(1, dot / (m1 * m2)));
+  return (Math.acos(cos) * 180) / Math.PI;
 }

@@ -39,7 +39,9 @@ import {
 import {
   ArrowLeft,
   ArrowUpRight,
+  Check,
   Circle as CircleIcon,
+  Crop as CropIcon,
   Eye,
   EyeOff,
   FileImage,
@@ -55,9 +57,12 @@ import {
   Square,
   Trash2,
   Type as TypeIcon,
+  X as XIcon,
   XSquare,
   ZoomIn,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useImageEditRoundtripStore } from "@stores/imageEditRoundtripStore";
 import {
   Circle,
   Ellipse,
@@ -90,6 +95,11 @@ import {
   type SicroImageDoc,
 } from "../engine";
 import { adjustmentsToCssFilter, assetUrl, prettyBytes, shortHash } from "./shared";
+import { HistogramPanel } from "./HistogramPanel";
+import { ExifPanel } from "./ExifPanel";
+import { ProcessingStackPanel } from "./ProcessingStackPanel";
+import { ReportPreviewDialog } from "./ReportPreviewDialog";
+import { FileText } from "lucide-react";
 import styles from "./ImageEditor.module.css";
 
 type Tool =
@@ -104,7 +114,8 @@ type Tool =
   | "point"
   | "measurement"
   | "redaction"
-  | "set_scale";
+  | "set_scale"
+  | "crop";
 
 interface Props {
   workspacePath: string;
@@ -114,21 +125,85 @@ interface Props {
 const RIGHT_TABS: Array<{ key: RightTab; label: string }> = [
   { key: "layers", label: "Camadas" },
   { key: "adjust", label: "Ajustes" },
+  // G12 — novas abas:
+  { key: "filters", label: "Filtros" },
+  { key: "histogram", label: "Histograma" },
+  { key: "exif", label: "EXIF" },
   { key: "annotations", label: "Objetos" },
   { key: "history", label: "Histórico" },
   { key: "meta", label: "Metadados" },
 ];
-type RightTab = "layers" | "adjust" | "annotations" | "history" | "meta";
+type RightTab =
+  | "layers"
+  | "adjust"
+  | "filters"
+  | "histogram"
+  | "exif"
+  | "annotations"
+  | "history"
+  | "meta";
 
 export function ImageEditor({ workspacePath, onClose }: Props) {
   const analysis = useImagemStore((s) => s.activeAnalysis)!;
   const initialDoc = useImagemStore((s) => s.activeDoc)!;
   const saveActive = useImagemStore((s) => s.saveActive);
 
+  // Pós-laudo S — Round-trip Laudo ↔ Imagem.
+  const navigate = useNavigate();
+  const roundtripState = useImageEditRoundtripStore((s) => s.state);
+  const roundtripRequest = useImageEditRoundtripStore((s) => s.request);
+  const completeRoundtrip = useImageEditRoundtripStore((s) => s.completeEdit);
+  const isRoundtripActive = roundtripState === "editing" && !!roundtripRequest;
+  const [returningToLaudo, setReturningToLaudo] = useState(false);
+
   const [doc, setDoc] = useState<SicroImageDoc>(initialDoc);
+  // G12.22 — Modal de relatório pericial.
+  const [reportOpen, setReportOpen] = useState(false);
   const [tool, setTool] = useState<Tool>("select");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pending, setPending] = useState<{ x: number; y: number } | null>(null);
+
+  // Pós-laudo S — Crop tool state.
+  // O fluxo: clica "Cortar" → tool="crop" → um retângulo de seleção
+  // aparece já posicionado no centro da imagem (ou no crop atual, se
+  // houver um). O perito ajusta arrastando o retângulo inteiro (move)
+  // ou as 8 handles (4 cantos + 4 lados). "Aplicar" empurra a op
+  // pra processing_stack + atualiza `cropApplied` para que o
+  // KonvaImage renderize só a região recortada.
+  const [cropPending, setCropPending] = useState<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  } | null>(null);
+  // Limite mínimo do retângulo de crop em pixels (impede colapsos).
+  const CROP_MIN_PX = 16;
+
+  // Crop ATIVO derivado do processing_stack: pega o último op crop habilitado
+  // e usa as params {x,y,width,height} pra crop o KonvaImage.
+  const cropApplied = useMemo(() => {
+    const ops = doc.processing_stack ?? [];
+    for (let i = ops.length - 1; i >= 0; i--) {
+      const op = ops[i];
+      if (op && op.enabled && op.kind === "crop") {
+        const p = op.params as {
+          x?: number;
+          y?: number;
+          width?: number;
+          height?: number;
+        };
+        if (
+          typeof p.x === "number" &&
+          typeof p.y === "number" &&
+          typeof p.width === "number" &&
+          typeof p.height === "number"
+        ) {
+          return { x: p.x, y: p.y, width: p.width, height: p.height };
+        }
+      }
+    }
+    return null;
+  }, [doc.processing_stack]);
   const [rightTab, setRightTab] = useState<RightTab>("adjust");
   const [feedback, setFeedback] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -191,6 +266,36 @@ export function ImageEditor({ workspacePath, onClose }: Props) {
     };
     img.onerror = () => setHtmlImage(null);
   }, [imageUrl, stageSize.width, stageSize.height]);
+
+  // ----- Pós-laudo S — Inicializa o retângulo de crop ao entrar em modo -----
+  //
+  // Quando o perito ativa a tool "crop", o retângulo aparece pronto:
+  //   - se já existe um crop aplicado: começa por ele (deixa ajustar);
+  //   - senão: 80% centralizado da imagem.
+  // Saída do modo (tool muda) limpa cropPending.
+  useEffect(() => {
+    if (tool !== "crop") {
+      setCropPending(null);
+      return;
+    }
+    if (!htmlImage) return;
+    if (cropPending) return; // já inicializado
+    if (cropApplied) {
+      setCropPending({ ...cropApplied });
+      return;
+    }
+    const iw = htmlImage.width;
+    const ih = htmlImage.height;
+    const w = Math.round(iw * 0.8);
+    const h = Math.round(ih * 0.8);
+    setCropPending({
+      x: Math.round((iw - w) / 2),
+      y: Math.round((ih - h) / 2),
+      width: w,
+      height: h,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, htmlImage]);
 
   // ----- Load logs when history tab opens -----
   useEffect(() => {
@@ -271,6 +376,11 @@ export function ImageEditor({ workspacePath, onClose }: Props) {
       x: (screen.x - viewport.x) / viewport.scale,
       y: (screen.y - viewport.y) / viewport.scale,
     };
+
+    // Pós-laudo S — Em modo "crop", clique no canvas é no-op. O retângulo
+    // de seleção é manipulado direto via drag das handles + corpo (ver
+    // CropOverlayLayer abaixo).
+    if (tool === "crop") return;
 
     if (tool === "marker") {
       const nextNumber =
@@ -397,6 +507,108 @@ export function ImageEditor({ workspacePath, onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, doc]);
 
+  // ----- Crop tool actions (pós-laudo S) -----
+  const applyCrop = () => {
+    if (!cropPending) return;
+    // Clamp ao tamanho da imagem natural (htmlImage).
+    if (!htmlImage) return;
+    const iw = htmlImage.width;
+    const ih = htmlImage.height;
+    const x = Math.max(0, Math.min(iw - 1, Math.round(cropPending.x)));
+    const y = Math.max(0, Math.min(ih - 1, Math.round(cropPending.y)));
+    const width = Math.max(1, Math.min(iw - x, Math.round(cropPending.width)));
+    const height = Math.max(1, Math.min(ih - y, Math.round(cropPending.height)));
+    const op = {
+      id: `crop_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      kind: "crop" as const,
+      enabled: true,
+      params: { x, y, width, height },
+      created_at: new Date().toISOString(),
+    };
+    // Substitui qualquer crop anterior (apenas um crop ativo por vez).
+    setDoc((d) => ({
+      ...d,
+      processing_stack: [
+        ...d.processing_stack.filter(
+          (o) => !(o.kind === "crop" && o.enabled),
+        ),
+        op,
+      ],
+    }));
+    setCropPending(null);
+    setTool("select");
+    setFeedback(`Corte aplicado (${width}×${height}px).`);
+  };
+  const cancelCrop = () => {
+    setCropPending(null);
+    setTool("select");
+  };
+  const removeAppliedCrop = () => {
+    setDoc((d) => ({
+      ...d,
+      processing_stack: d.processing_stack.filter((o) => o.kind !== "crop"),
+    }));
+    setFeedback("Corte removido — imagem original restaurada.");
+  };
+
+  // ----- Round-trip: Salvar e voltar pro laudo (pós-laudo S) -----
+  const handleReturnToLaudo = async () => {
+    if (!roundtripRequest) return;
+    setReturningToLaudo(true);
+    setFeedback("Salvando e exportando…");
+    try {
+      // Salva o doc atual (com processing_stack incluindo o crop).
+      const metadata = {
+        annotations_count: doc.annotations.length,
+        has_scale: !!doc.scale,
+        view_adjustments: doc.view_adjustments,
+        roundtrip: true,
+      };
+      await saveActive(workspacePath, doc, JSON.stringify(metadata));
+
+      // Compõe o PNG visual via Konva (com o crop aplicado visualmente —
+      // veja o KonvaImage abaixo). Backend não re-aplica ajustes pra
+      // evitar dupla aplicação.
+      const dataUrl =
+        stageRef.current?.toDataURL({
+          pixelRatio: 2,
+          mimeType: "image/png",
+        }) ?? null;
+      const composedBase64 = dataUrl
+        ? dataUrl.replace(/^data:image\/png;base64,/, "")
+        : null;
+
+      const exp = await commands.exportImageDerivative(
+        workspacePath,
+        analysis.id,
+        {
+          apply_backend_adjustments: false,
+          composed_png_base64: composedBase64,
+          adjustments: doc.view_adjustments,
+          operations: [],
+          format: "png",
+          operation_summary_json: JSON.stringify({
+            roundtrip_source: roundtripRequest.source_relative_path,
+            laudo_id: roundtripRequest.laudo_id,
+            crop_applied: cropApplied,
+            annotations: doc.annotations.length,
+          }),
+        },
+      );
+
+      // Sinaliza o store: o laudo vai pegar isso ao montar.
+      completeRoundtrip({
+        output_relative_path: exp.output_relative_path,
+        source_relative_path: roundtripRequest.source_relative_path,
+      });
+      // Volta pro laudo. O LaudoEditorView aplica o novo path nas figures.
+      navigate("/laudo");
+    } catch (err) {
+      setFeedback(`Falha ao voltar para o laudo: ${toSicroError(err).message}`);
+      setReturningToLaudo(false);
+    }
+  };
+
   // ----- Actions -----
   const handleSave = async () => {
     setSaving(true);
@@ -469,6 +681,34 @@ export function ImageEditor({ workspacePath, onClose }: Props) {
 
   return (
     <div className={styles.wrap}>
+      {/* Pós-laudo S — Banner do round-trip Laudo↔Imagem. */}
+      {isRoundtripActive && roundtripRequest && (
+        <div
+          style={{
+            background:
+              "linear-gradient(90deg, rgba(14,165,233,0.15), rgba(14,165,233,0.05))",
+            borderBottom: "1px solid rgba(14,165,233,0.4)",
+            padding: "8px 16px",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            fontSize: 12,
+            color: "var(--sicro-fg)",
+          }}
+        >
+          <CropIcon size={14} color="#0ea5e9" />
+          <strong>Editando foto do laudo</strong>
+          {roundtripRequest.laudo_title && (
+            <span style={{ color: "var(--sicro-fg-dim)" }}>
+              — {roundtripRequest.laudo_title}
+            </span>
+          )}
+          <span style={{ marginLeft: "auto", color: "var(--sicro-fg-dim)" }}>
+            Clique <strong>Salvar e voltar</strong> para devolver ao laudo
+            com as edições aplicadas.
+          </span>
+        </div>
+      )}
       <header className={styles.topBar}>
         <button type="button" className={styles.backBtn} onClick={onClose}>
           <ArrowLeft size={14} /> Voltar
@@ -488,14 +728,37 @@ export function ImageEditor({ workspacePath, onClose }: Props) {
           >
             {saving ? "Salvando…" : "Salvar"}
           </Button>
+          {/* G12.22 — Botão de relatório pericial. */}
           <Button
-            variant="primary"
-            leftIcon={<FileImage size={14} />}
-            onClick={() => void handleExport()}
-            disabled={exporting}
+            variant="secondary"
+            leftIcon={<FileText size={14} />}
+            onClick={() => setReportOpen(true)}
           >
-            {exporting ? "Exportando…" : "Exportar"}
+            Relatório
           </Button>
+          {isRoundtripActive ? (
+            // Pós-laudo S — Botão dedicado de round-trip. Substitui o
+            // botão "Exportar" enquanto o roundtrip estiver ativo —
+            // o perito só precisa decidir Salvar+voltar, não exportação
+            // genérica.
+            <Button
+              variant="primary"
+              leftIcon={<Check size={14} />}
+              onClick={() => void handleReturnToLaudo()}
+              disabled={returningToLaudo}
+            >
+              {returningToLaudo ? "Voltando…" : "Salvar e voltar pro laudo"}
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              leftIcon={<FileImage size={14} />}
+              onClick={() => void handleExport()}
+              disabled={exporting}
+            >
+              {exporting ? "Exportando…" : "Exportar"}
+            </Button>
+          )}
         </div>
       </header>
 
@@ -515,9 +778,116 @@ export function ImageEditor({ workspacePath, onClose }: Props) {
           <ToolBtn icon={<Hash size={14} />} active={tool === "set_scale"} onClick={() => setTool("set_scale")} title="Definir escala" />
           <div className={styles.toolDivider} />
           <ToolBtn icon={<XSquare size={14} />} active={tool === "redaction"} onClick={() => setTool("redaction")} title="Tarja" />
+          <div className={styles.toolDivider} />
+          {/* Pós-laudo S — Crop tool. */}
+          <ToolBtn
+            icon={<CropIcon size={14} />}
+            active={tool === "crop"}
+            onClick={() => {
+              // O retângulo é inicializado pelo useEffect — limpa o
+              // estado anterior pra forçar reinit a partir do crop
+              // aplicado (ou default).
+              setCropPending(null);
+              setTool("crop");
+            }}
+            title="Cortar imagem (arraste o retângulo)"
+          />
+          {cropApplied && tool !== "crop" && (
+            <ToolBtn
+              icon={<XIcon size={14} />}
+              active={false}
+              onClick={removeAppliedCrop}
+              title="Remover corte aplicado"
+            />
+          )}
         </aside>
 
-        <div className={styles.canvasArea} ref={canvasWrapRef}>
+        <div
+          className={styles.canvasArea}
+          ref={canvasWrapRef}
+          style={{ position: "relative" }}
+        >
+          {/* Pós-laudo S — Barra flutuante de Apply/Cancel do crop tool. */}
+          {tool === "crop" && (
+            <div
+              style={{
+                position: "absolute",
+                top: 12,
+                left: "50%",
+                transform: "translateX(-50%)",
+                zIndex: 10,
+                background: "rgba(15, 23, 42, 0.92)",
+                color: "#fff",
+                padding: "8px 12px",
+                borderRadius: 6,
+                display: "flex",
+                gap: 8,
+                alignItems: "center",
+                fontSize: 12,
+                boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+              }}
+            >
+              {cropPending ? (
+                <span>
+                  Arraste o retângulo ou as alças —{" "}
+                  <strong>
+                    {Math.round(cropPending.width)}×
+                    {Math.round(cropPending.height)} px
+                  </strong>
+                </span>
+              ) : (
+                <span>Preparando seleção…</span>
+              )}
+              <div
+                style={{
+                  width: 1,
+                  height: 16,
+                  background: "rgba(255,255,255,0.2)",
+                  margin: "0 4px",
+                }}
+              />
+              <button
+                type="button"
+                onClick={applyCrop}
+                disabled={!cropPending}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "4px 10px",
+                  background: cropPending ? "#0ea5e9" : "rgba(255,255,255,0.1)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: cropPending ? "pointer" : "not-allowed",
+                  fontFamily: "inherit",
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+              >
+                <Check size={12} /> Aplicar
+              </button>
+              <button
+                type="button"
+                onClick={cancelCrop}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  padding: "4px 10px",
+                  background: "rgba(255,255,255,0.1)",
+                  color: "#fff",
+                  border: "none",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  fontSize: 12,
+                }}
+              >
+                <XIcon size={12} /> Cancelar
+              </button>
+            </div>
+          )}
           <Stage
             ref={stageRef}
             width={stageSize.width}
@@ -547,7 +917,25 @@ export function ImageEditor({ workspacePath, onClose }: Props) {
                 Pragmatic approach: render the HTMLImageElement and rely on the visual presentation through
                 a stage-wrapping div CSS filter. We pass the filter through the wrapper container. */}
             <Layer listening={false}>
-              {htmlImage && (
+              {htmlImage && cropApplied ? (
+                // Pós-laudo S — crop aplicado: usa `crop` do Konva.Image pra
+                // limitar a região renderizada à do crop_op. x/y/width/height
+                // viram as dimensões cortadas — a imagem aparece "encolhida"
+                // pro tamanho do recorte.
+                <KonvaImage
+                  image={htmlImage}
+                  x={0}
+                  y={0}
+                  width={cropApplied.width}
+                  height={cropApplied.height}
+                  crop={{
+                    x: cropApplied.x,
+                    y: cropApplied.y,
+                    width: cropApplied.width,
+                    height: cropApplied.height,
+                  }}
+                />
+              ) : htmlImage ? (
                 <KonvaImage
                   image={htmlImage}
                   x={0}
@@ -555,8 +943,22 @@ export function ImageEditor({ workspacePath, onClose }: Props) {
                   width={htmlImage.width}
                   height={htmlImage.height}
                 />
-              )}
+              ) : null}
             </Layer>
+            {/* Pós-laudo S — Crop tool: retângulo arrastável + 8 handles +
+                dim outside. Tudo em escala de "imagem source" (coords
+                world). Os handles usam 1/viewport.scale pra ficar com
+                tamanho constante na tela mesmo quando o usuário dá zoom. */}
+            {tool === "crop" && cropPending && htmlImage && (
+              <CropOverlayLayer
+                imageWidth={htmlImage.width}
+                imageHeight={htmlImage.height}
+                crop={cropPending}
+                viewportScale={viewport.scale}
+                minSize={CROP_MIN_PX}
+                onChange={(next) => setCropPending(next)}
+              />
+            )}
             <Layer ref={objectsLayerRef} visible={annotationsLayerVisible}>
               {doc.annotations.map((a) => (
                 <AnnotationNode
@@ -670,11 +1072,38 @@ export function ImageEditor({ workspacePath, onClose }: Props) {
                 }}
               />
             )}
+            {rightTab === "filters" && (
+              <ProcessingStackPanel
+                stack={doc.processing_stack ?? []}
+                onChange={(next) =>
+                  setDoc((d) => ({ ...d, processing_stack: next }))
+                }
+              />
+            )}
+            {rightTab === "histogram" && (
+              <HistogramPanel
+                workspacePath={workspacePath}
+                relativePath={doc.source.original_relative_path}
+              />
+            )}
+            {rightTab === "exif" && (
+              <ExifPanel
+                workspacePath={workspacePath}
+                relativePath={doc.source.original_relative_path}
+              />
+            )}
             {rightTab === "history" && <HistoryPanel logs={logs} />}
             {rightTab === "meta" && <MetaPanel doc={doc} />}
           </div>
         </aside>
       </div>
+      {/* G12.22 — Modal global do relatório pericial */}
+      <ReportPreviewDialog
+        open={reportOpen}
+        workspacePath={workspacePath}
+        analysisId={analysis.id}
+        onClose={() => setReportOpen(false)}
+      />
     </div>
   );
 }
@@ -702,6 +1131,240 @@ function ToolBtn({
     >
       {icon}
     </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pós-laudo S — Crop Overlay (Konva)
+//
+// Camada de seleção do crop tool. Renderiza:
+//   - 4 retângulos escuros cobrindo a área que será descartada (dim);
+//   - 1 retângulo brilhante (claro) com borda azul = a área que fica;
+//   - 8 handles (4 cantos + 4 lados) draggables.
+//
+// Todas as coordenadas estão no espaço da imagem source (mundo).
+// `viewportScale` escala os elementos visuais (handles, traços) para
+// manter tamanho constante na tela mesmo com zoom.
+//
+// O componente é totalmente controlado pelo pai via `crop` + `onChange`.
+
+interface CropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+function CropOverlayLayer({
+  imageWidth,
+  imageHeight,
+  crop,
+  viewportScale,
+  minSize,
+  onChange,
+}: {
+  imageWidth: number;
+  imageHeight: number;
+  crop: CropRect;
+  viewportScale: number;
+  minSize: number;
+  onChange: (next: CropRect) => void;
+}) {
+  // Tamanhos visuais constantes em pixels de tela (independentes do zoom).
+  const handleSize = 10 / viewportScale; // lado do quadrado handle
+  const handleHit = 16 / viewportScale; // área de clique invisível extra
+  const strokeWidth = 2 / viewportScale;
+  const dashLen = 6 / viewportScale;
+
+  // Clamp helper — garante: dentro da imagem + tamanho mínimo.
+  const clampRect = (r: CropRect): CropRect => {
+    const x = Math.max(0, Math.min(imageWidth - minSize, r.x));
+    const y = Math.max(0, Math.min(imageHeight - minSize, r.y));
+    const width = Math.max(minSize, Math.min(imageWidth - x, r.width));
+    const height = Math.max(minSize, Math.min(imageHeight - y, r.height));
+    return { x, y, width, height };
+  };
+
+  // Mover o retângulo inteiro (drag no corpo).
+  const onBodyDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
+    const node = e.target;
+    const nx = node.x();
+    const ny = node.y();
+    onChange(clampRect({ ...crop, x: nx, y: ny }));
+  };
+
+  // Helpers para handles: cada um atualiza 1 ou 2 bordas (left, top, right, bottom).
+  type Edge = "l" | "t" | "r" | "b";
+  const dragHandle = (edges: Edge[]) =>
+    (e: Konva.KonvaEventObject<DragEvent>) => {
+      const node = e.target;
+      const nx = node.x();
+      const ny = node.y();
+      let left = crop.x;
+      let top = crop.y;
+      let right = crop.x + crop.width;
+      let bottom = crop.y + crop.height;
+      if (edges.includes("l")) left = nx;
+      if (edges.includes("t")) top = ny;
+      if (edges.includes("r")) right = nx;
+      if (edges.includes("b")) bottom = ny;
+      // Garante invariantes (left < right, top < bottom).
+      if (right < left + minSize) {
+        if (edges.includes("r")) right = left + minSize;
+        else left = right - minSize;
+      }
+      if (bottom < top + minSize) {
+        if (edges.includes("b")) bottom = top + minSize;
+        else top = bottom - minSize;
+      }
+      onChange(
+        clampRect({
+          x: left,
+          y: top,
+          width: right - left,
+          height: bottom - top,
+        }),
+      );
+    };
+
+  // Posições das 8 handles (cx, cy) + edges que cada uma controla + cursor.
+  const cx = crop.x + crop.width / 2;
+  const cy = crop.y + crop.height / 2;
+  const x2 = crop.x + crop.width;
+  const y2 = crop.y + crop.height;
+  const handles: Array<{
+    key: string;
+    cx: number;
+    cy: number;
+    edges: Edge[];
+    cursor: string;
+  }> = [
+    { key: "nw", cx: crop.x, cy: crop.y, edges: ["l", "t"], cursor: "nwse-resize" },
+    { key: "n", cx, cy: crop.y, edges: ["t"], cursor: "ns-resize" },
+    { key: "ne", cx: x2, cy: crop.y, edges: ["r", "t"], cursor: "nesw-resize" },
+    { key: "e", cx: x2, cy, edges: ["r"], cursor: "ew-resize" },
+    { key: "se", cx: x2, cy: y2, edges: ["r", "b"], cursor: "nwse-resize" },
+    { key: "s", cx, cy: y2, edges: ["b"], cursor: "ns-resize" },
+    { key: "sw", cx: crop.x, cy: y2, edges: ["l", "b"], cursor: "nesw-resize" },
+    { key: "w", cx: crop.x, cy, edges: ["l"], cursor: "ew-resize" },
+  ];
+
+  return (
+    <Layer>
+      {/* Dim outside: 4 retângulos ao redor da área de crop. */}
+      <Rect
+        x={0}
+        y={0}
+        width={imageWidth}
+        height={crop.y}
+        fill="rgba(0,0,0,0.55)"
+        listening={false}
+      />
+      <Rect
+        x={0}
+        y={crop.y + crop.height}
+        width={imageWidth}
+        height={Math.max(0, imageHeight - crop.y - crop.height)}
+        fill="rgba(0,0,0,0.55)"
+        listening={false}
+      />
+      <Rect
+        x={0}
+        y={crop.y}
+        width={crop.x}
+        height={crop.height}
+        fill="rgba(0,0,0,0.55)"
+        listening={false}
+      />
+      <Rect
+        x={crop.x + crop.width}
+        y={crop.y}
+        width={Math.max(0, imageWidth - crop.x - crop.width)}
+        height={crop.height}
+        fill="rgba(0,0,0,0.55)"
+        listening={false}
+      />
+
+      {/* Retângulo principal: borda + corpo draggable para mover tudo. */}
+      <Rect
+        x={crop.x}
+        y={crop.y}
+        width={crop.width}
+        height={crop.height}
+        stroke="#0ea5e9"
+        strokeWidth={strokeWidth}
+        dash={[dashLen, dashLen * 0.6]}
+        fill="transparent"
+        draggable
+        onDragMove={onBodyDragMove}
+        onMouseEnter={(e) => {
+          const stage = e.target.getStage();
+          if (stage) stage.container().style.cursor = "move";
+        }}
+        onMouseLeave={(e) => {
+          const stage = e.target.getStage();
+          if (stage) stage.container().style.cursor = "";
+        }}
+      />
+
+      {/* Linhas de regra dos terços — ajudam composição visual. */}
+      {[1, 2].map((i) => (
+        <Line
+          key={`v${i}`}
+          points={[
+            crop.x + (crop.width * i) / 3,
+            crop.y,
+            crop.x + (crop.width * i) / 3,
+            crop.y + crop.height,
+          ]}
+          stroke="rgba(255,255,255,0.35)"
+          strokeWidth={1 / viewportScale}
+          listening={false}
+        />
+      ))}
+      {[1, 2].map((i) => (
+        <Line
+          key={`h${i}`}
+          points={[
+            crop.x,
+            crop.y + (crop.height * i) / 3,
+            crop.x + crop.width,
+            crop.y + (crop.height * i) / 3,
+          ]}
+          stroke="rgba(255,255,255,0.35)"
+          strokeWidth={1 / viewportScale}
+          listening={false}
+        />
+      ))}
+
+      {/* 8 handles draggables. Cada handle é um Rect branco com borda azul. */}
+      {handles.map((h) => (
+        <Rect
+          key={h.key}
+          x={h.cx}
+          y={h.cy}
+          width={handleSize}
+          height={handleSize}
+          offsetX={handleSize / 2}
+          offsetY={handleSize / 2}
+          fill="#fff"
+          stroke="#0ea5e9"
+          strokeWidth={1.5 / viewportScale}
+          draggable
+          onDragMove={dragHandle(h.edges)}
+          // Aumenta área de clique invisível (hitStrokeWidth → padding clicável).
+          hitStrokeWidth={handleHit}
+          onMouseEnter={(e) => {
+            const stage = e.target.getStage();
+            if (stage) stage.container().style.cursor = h.cursor;
+          }}
+          onMouseLeave={(e) => {
+            const stage = e.target.getStage();
+            if (stage) stage.container().style.cursor = "";
+          }}
+        />
+      ))}
+    </Layer>
   );
 }
 

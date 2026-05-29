@@ -14,6 +14,33 @@
   display: block;
 }
 
+/* F7.3 — Container da régua vertical com N segmentos por página. Cada
+ * segmento é um SVG absolute. O fundo do container fica transparente
+ * para que o gap entre páginas mostre o workspace.
+ *
+ * F7.4 — `align-self: flex-start` garante que o flex `.midRow` (que tem
+ * `align-items: stretch`) NÃO estica a régua além da altura definida em
+ * cm. Mantém alinhamento pixel-perfect com o pageStack. */
+.verticalContainer {
+  position: relative;
+  background: transparent;
+  align-self: flex-start;
+}
+
+.segment {
+  display: block;
+}
+
+.dragGuideHorizontal {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed #fbbf24;
+  pointer-events: none;
+  z-index: 10;
+}
+
 .bg {
   fill: #2a3a52;
 }
@@ -40,6 +67,39 @@
   fill: var(--sicro-accent);
   stroke: rgba(0, 0, 0, 0.2);
   stroke-width: 0.5;
+  transition: transform 80ms ease;
+}
+
+/* F7.1 — Handle ativo durante drag: cresce + sombra dourada. */
+.handleActive {
+  fill: #fbbf24;
+  stroke: rgba(0, 0, 0, 0.45);
+  stroke-width: 1;
+  transform: scale(1.25);
+  transform-origin: center;
+}
+
+/* F7.1 — Linha guia que aparece durante o drag pra reforçar feedback. */
+.dragLine {
+  stroke: #fbbf24;
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+  pointer-events: none;
+}
+
+/* R — Handle do recuo da primeira linha. Triângulo que aponta PRA BAIXO
+ * no topo da régua. Cor diferente das margens (azul) pra distinguir. */
+.indentHandle {
+  fill: #1f6feb;
+  stroke: rgba(0, 0, 0, 0.2);
+  stroke-width: 0.5;
+  transition: transform 0.1s ease;
+}
+.indentHandleActive {
+  fill: #3b82f6;
+  stroke: rgba(0, 0, 0, 0.45);
+  stroke-width: 1;
+  filter: drop-shadow(0 0 3px rgba(31, 111, 235, 0.7));
 }
 
 .pageMark {

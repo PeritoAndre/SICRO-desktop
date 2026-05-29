@@ -142,3 +142,86 @@ export function resolveHeaderField(
   if (typeof value === "number") return String(value);
   return String(value);
 }
+
+/**
+ * N12 — Migração suave de docs legados que tinham `institutional_template`
+ * setado mas não tinham o cabeçalho Word-style ainda.
+ *
+ * Retorna um `SicroDocHeader` semeado a partir das `brand_lines`,
+ * `subtitle` e `metadata_fields` do template institucional, OU `null`
+ * quando NÃO há nada para migrar (doc novo, sem template, ou doc que
+ * já foi migrado e tem conteúdo no header).
+ *
+ * O caller (laudoStore.openLaudo) é quem decide quando aplicar — só
+ * deve chamar quando o `doc.header.content` está vazio e há template.
+ * Após aplicar, persiste via `save_laudo` pra a próxima abertura não
+ * re-migrar.
+ *
+ * Não importa schema dependencies aqui — retorna ProseMirror JSON puro
+ * pra evitar ciclos com schema.ts.
+ */
+export function seedHeaderContentFromInstitutionalTemplate(
+  template: InstitutionalTemplate,
+  metadata: Record<string, unknown>,
+  occurrence: Record<string, unknown> | null,
+): unknown {
+  const paragraphs: unknown[] = [];
+
+  // Brand lines em negrito centralizadas.
+  for (const line of template.header.brand_lines) {
+    paragraphs.push({
+      type: "paragraph",
+      attrs: { textAlign: "center" },
+      content: [
+        {
+          type: "text",
+          marks: [{ type: "bold" }],
+          text: line,
+        },
+      ],
+    });
+  }
+
+  if (template.header.subtitle) {
+    paragraphs.push({
+      type: "paragraph",
+      attrs: { textAlign: "center" },
+      content: [
+        {
+          type: "text",
+          marks: [{ type: "italic" }],
+          text: template.header.subtitle,
+        },
+      ],
+    });
+  }
+
+  // Metadata em linha única separada por " · " (só os que tem valor).
+  const metadataParts = template.header.metadata_fields
+    .map((f) => {
+      const value = resolveHeaderField(f.source, metadata, occurrence);
+      return value ? `${f.label}: ${value}` : null;
+    })
+    .filter((s): s is string => s !== null);
+
+  if (metadataParts.length > 0) {
+    paragraphs.push({
+      type: "paragraph",
+      attrs: { textAlign: "center" },
+      content: [
+        {
+          type: "text",
+          text: metadataParts.join(" · "),
+        },
+      ],
+    });
+  }
+
+  // Se nada foi adicionado (template sem brand_lines, sem subtitle, sem
+  // metadata resolvido), retorna doc vazio default.
+  if (paragraphs.length === 0) {
+    return { type: "doc", content: [{ type: "paragraph" }] };
+  }
+
+  return { type: "doc", content: paragraphs };
+}

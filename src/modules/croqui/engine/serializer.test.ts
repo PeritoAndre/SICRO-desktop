@@ -228,6 +228,74 @@ describe("serializeCroquiDoc", () => {
     expect(reparsed.background_image?.locked).toBe(false);
   });
 
+  // MVP 10 Round 5 — closed_path + markings.color additive fields.
+  it("legacy road object (no closed_path / markings.color) loads unchanged", () => {
+    const d = coerceCroquiDoc({
+      ...VALID_MINIMUM,
+      objects: [
+        {
+          id: "r1",
+          layer_id: "layer_objects",
+          kind: "road",
+          subtype: "spline",
+          points: [0, 0, 100, 0],
+          width: 80,
+          lane_count: 2,
+          direction: "two_way",
+          road_style: "urban",
+          markings: {
+            center_line: "dashed",
+            edge_line: true,
+            lane_dividers: false,
+          },
+          curb: { enabled: true, width: 2, color: "#475569" },
+          surface: { fill: "#3f3f46" },
+          spline_tension: 0.5,
+        },
+      ],
+    });
+    const road = d.objects[0]!;
+    if (road.kind !== "road") throw new Error("expected road");
+    expect(road.closed_path).toBeUndefined();
+    expect(road.markings.color).toBeUndefined();
+  });
+
+  it("preserves closed_path and markings.color through coerce + stringify + reparse", () => {
+    const stamped = serializeCroquiDoc(
+      coerceCroquiDoc({
+        ...VALID_MINIMUM,
+        objects: [
+          {
+            id: "r1",
+            layer_id: "layer_objects",
+            kind: "road",
+            subtype: "osm_way",
+            points: [0, 0, 50, 50, 0, 100, 0, 0],
+            width: 180,
+            lane_count: 4,
+            direction: "unknown",
+            road_style: "highway",
+            markings: {
+              center_line: "none",
+              edge_line: true,
+              lane_dividers: false,
+              color: "yellow",
+            },
+            curb: { enabled: false, width: 0, color: "#475569" },
+            surface: { fill: "#27272a" },
+            spline_tension: 0.7,
+            closed_path: true,
+          },
+        ],
+      }),
+    );
+    const re = coerceCroquiDoc(JSON.parse(JSON.stringify(stamped)));
+    const road = re.objects[0]!;
+    if (road.kind !== "road") throw new Error("expected road");
+    expect(road.closed_path).toBe(true);
+    expect(road.markings.color).toBe("yellow");
+  });
+
   it("drops invalid background_image (no source_path) without crashing", () => {
     const d = coerceCroquiDoc({
       ...VALID_MINIMUM,

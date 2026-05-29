@@ -60,6 +60,33 @@ import {
   type SicroVehicleObject,
   type VehicleBodyType,
 } from "../engine";
+// Road Engine 2.0 — ribbon-polygon renderer. Activated per-croqui via
+// `doc.road_engine_version === "v2"`. v1 (this file's `RoadNode`)
+// remains the default and the fallback.
+//
+// `RoundaboutMeshNode` é a primitiva rotatória aditiva (Ciclo 2). Não
+// depende do flag v1/v2 — `kind: "roundabout"` é um tipo novo que só
+// existe a partir do Ciclo 2 e sempre renderiza com o motor v2.
+//
+// `buildRoadContext` / `RoadContext` modelam o conjunto de outras
+// vias que cada via deve consultar ao clipar suas próprias marcações
+// (Fase F). O contexto é construído uma vez por render do Stage.
+// `RoadMeshNode` continua exportado pelo road-v2 (singular renderer
+// de uma via, sem rede), mas o CanvasStage v2 usa `RoadNetworkLayerV2`
+// — o renderer global multipass que substituiu a abordagem
+// per-objeto do Ciclo 2 anterior.
+import {
+  RoadNetworkLayerV2,
+  RoundaboutMeshNode,
+} from "../engine/road-v2";
+// Fase H.3 — Python Parity Engine integrado atrás de feature flag
+// `road_engine_version === "parity"`. v1/v2 continuam intactos.
+import {
+  RoadParityRenderer,
+  isParityObject,
+  type SicroParityObject,
+} from "../engine/road-parity";
+import type { SicroRoundaboutObject } from "../engine";
 import type { EditorState, Tool } from "./useEditorState";
 
 export interface CanvasStageHandle {
@@ -95,6 +122,15 @@ interface Props {
   /** Called when the user finishes a Konva drag/transform on an object. */
   onObjectChange: (id: string, patch: Partial<SicroObject>) => void;
   /**
+   * Fase H.3 — handler dedicado para parity_objects (que vivem em
+   * array separado de doc.objects). Opcional; quando ausente, handles
+   * parity ficam estáticos (renderiza mas não dragga).
+   */
+  onParityObjectChange?: (
+    id: string,
+    patch: Partial<SicroParityObject>,
+  ) => void;
+  /**
    * Called when the user drags / transforms the background image
    * (MVP 9 Round 5). The patch carries the deltas: `x`, `y`, `width`,
    * `height`, `rotation` — whichever the gesture changed.
@@ -113,6 +149,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     onCanvasClick,
     onCanvasDblClick,
     onObjectChange,
+    onParityObjectChange,
     onBackgroundChange,
     onSelect,
     workspacePath,
@@ -211,7 +248,13 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
   //      RoadNode uses these to literally skip drawing markings inside
   //      the junction — so even if the patch were translucent (or the
   //      colour mismatched), the lines wouldn't shimmer through.
-  const { roadObjects, nonRoadObjects, intersectionPatches, clipZonesByRoad } =
+  const {
+    roadObjects,
+    nonRoadObjects,
+    roundaboutObjects,
+    intersectionPatches,
+    clipZonesByRoad,
+  } =
     useMemo(() => {
       const roads: SicroRoadObject[] = [];
       const others: SicroObject[] = [];
@@ -279,9 +322,18 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
           }
         }
       }
+      // Road Engine 2.0 — separa rotatórias dos `others` para que o
+      // `RoadNetworkLayerV2` possa renderizá-las em passes globais.
+      const roundaboutsArr: SicroRoundaboutObject[] = [];
+      const othersWithoutRoundabouts: SicroObject[] = [];
+      for (const o of others) {
+        if (o.kind === "roundabout") roundaboutsArr.push(o);
+        else othersWithoutRoundabouts.push(o);
+      }
       return {
         roadObjects: roads,
-        nonRoadObjects: others,
+        nonRoadObjects: othersWithoutRoundabouts,
+        roundaboutObjects: roundaboutsArr,
         intersectionPatches: patches,
         clipZonesByRoad: zones,
       };
@@ -354,36 +406,92 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
             asphalt. Intersection patches sit between the two passes so
             they cover the road markings at crossings but don't hide the
             objects above. */}
-        {roadObjects.map((obj) => (
-          <ObjectNode
-            key={obj.id}
-            obj={obj}
-            doc={doc}
-            tool={editor.tool}
-            selected={editor.selectedId === obj.id}
-            onSelect={() => onSelect(obj.id)}
-            onChange={(patch) => onObjectChange(obj.id, patch)}
-            clipZones={clipZonesByRoad[obj.id]}
+        {doc.road_engine_version === "parity" ? (
+          // ─── Python Parity Engine (Fase H.3) ──────────────────────
+          // Pipeline simples paridade SICRO 1.0 Python.
+          // Consome `doc.parity_objects` (array dedicado, separado de
+          // `doc.objects` para preservar narrowing TypeScript do código
+          // legado v1/v2 — ver ROAD_ENGINE_PARITY_H1_REPORT.md).
+          <RoadParityRenderer
+            objects={
+              (doc.parity_objects ?? []).filter(
+                (o): o is SicroParityObject => isParityObject(o),
+              )
+            }
+            pxPerM={doc.scale?.px_per_m ?? null}
+            selectedId={editor.selectedId}
+            onSelect={(id) => onSelect(id ?? null)}
+            onObjectChange={
+              onParityObjectChange
+                ? (id, patch) => onParityObjectChange(id, patch)
+                : undefined
+            }
           />
-        ))}
-        {intersectionPatches.map((p) => {
-          // Flatten the polygon into the Konva format. We render with
-          // `closed` + `fill` and no `stroke` so the patch shape itself
-          // is invisible — only the colour fill that covers the
-          // marking conflicts inside the junction.
-          const flat: number[] = [];
-          for (const pt of p.polygon) flat.push(pt.x, pt.y);
-          return (
-            <Line
-              key={p.id}
-              points={flat}
-              closed
-              fill={p.fill}
-              strokeWidth={0}
-              listening={false}
-            />
-          );
-        })}
+        ) : doc.road_engine_version === "v2" ? (
+          // ─── Road Engine 2.0 v2 (Ciclo 2 fix) ──────────────────────
+          // RoadNetworkLayerV2 renderiza vias E rotatórias em passes
+          // globais (curbs → asfalto → junction patches → entry
+          // patches → bordas/marcações clipadas → handles). Substitui
+          // o approach Ciclo 2 anterior onde cada RoadMeshNode
+          // renderizava sozinho.
+          <RoadNetworkLayerV2
+            roads={roadObjects}
+            roundabouts={roundaboutObjects}
+            selectedId={editor.selectedId}
+            draggable={editor.tool === "select"}
+            onSelect={(id) => onSelect(id)}
+            onChange={(id, patch) => onObjectChange(id, patch)}
+            debugEnabled={editor.roadDebugV2}
+          />
+        ) : (
+          // ─── Road Engine v1 (legacy, fallback) ─────────────────────
+          <>
+            {roadObjects.map((obj) => (
+              <ObjectNode
+                key={obj.id}
+                obj={obj}
+                doc={doc}
+                tool={editor.tool}
+                selected={editor.selectedId === obj.id}
+                onSelect={() => onSelect(obj.id)}
+                onChange={(patch) => onObjectChange(obj.id, patch)}
+                clipZones={clipZonesByRoad[obj.id]}
+              />
+            ))}
+            {/* v1 junction patches: parallelogram fill cobrindo conflitos
+                de marcação. v2 substitui isso por patches no
+                RoadNetworkLayerV2. */}
+            {intersectionPatches.map((p) => {
+              const flat: number[] = [];
+              for (const pt of p.polygon) flat.push(pt.x, pt.y);
+              return (
+                <Line
+                  key={p.id}
+                  points={flat}
+                  closed
+                  fill={p.fill}
+                  strokeWidth={0}
+                  listening={false}
+                />
+              );
+            })}
+            {/* Rotatórias em v1 mode usam o RoundaboutMeshNode
+                individualmente (sem entry patches — não há rede). */}
+            {roundaboutObjects.map((obj) => (
+              <ObjectNode
+                key={obj.id}
+                obj={obj}
+                doc={doc}
+                tool={editor.tool}
+                selected={editor.selectedId === obj.id}
+                onSelect={() => onSelect(obj.id)}
+                onChange={(patch) => onObjectChange(obj.id, patch)}
+              />
+            ))}
+          </>
+        )}
+        {/* Não-vias e não-rotatórias (markers/vehicles/lines/text/
+            measurements) renderizam normalmente nos dois modos. */}
         {nonRoadObjects.map((obj) => (
           <ObjectNode
             key={obj.id}
@@ -618,7 +726,7 @@ function ObjectNode({
   selected: boolean;
   onSelect: () => void;
   onChange: (patch: Partial<SicroObject>) => void;
-  /** Junction clip zones — only meaningful for `kind === "road"`. */
+  /** Junction clip zones — only meaningful for `kind === "road"` in v1. */
   clipZones?: ClipCircle[];
 }) {
   // Only allow drag when the "select" tool is active.
@@ -676,7 +784,21 @@ function ObjectNode({
           onChange={onChange}
         />
       );
+    case "roundabout":
+      return (
+        <RoundaboutMeshNode
+          obj={obj as SicroRoundaboutObject}
+          draggable={draggable}
+          selected={selected}
+          onSelect={onSelect}
+          onChange={onChange}
+        />
+      );
     case "road":
+      // Road Engine v2 (`doc.road_engine_version === "v2"`) NÃO passa
+      // por aqui — o CanvasStage roteia vias v2 direto para o
+      // `RoadNetworkLayerV2` (render multipass global). Este case
+      // sempre renderiza com `RoadNode` (v1 legacy).
       return (
         <RoadNode
           obj={obj}
@@ -1161,7 +1283,12 @@ function RoadNode({
   const tension = obj.spline_tension;
   const showEdges = obj.markings.edge_line;
   const centerStyle = obj.markings.center_line;
-  const showCenter = centerStyle !== "none";
+  // Closed loops never get a centre marking — a yellow stripe across
+  // a rotatória reads as wrong even when OSM happens to leave the
+  // tag in. We belt-and-braces this here so future RoadStyle presets
+  // can't accidentally surface it.
+  const showCenter =
+    centerStyle !== "none" && obj.closed_path !== true;
   const showLaneDividers =
     obj.markings.lane_dividers && obj.lane_count > 1;
 
@@ -1226,14 +1353,36 @@ function RoadNode({
     clipMarkings,
   ]);
 
-  // Edge / centre colours follow Brazilian road-marking convention:
-  // highways use yellow centre + white edges; urban / avenue use white;
-  // dirt has none (the showCenter / showEdges flags gate them).
+  // Edge / centre colours.
+  //
+  // MVP 10 Round 5 — the perito can now override the marking colour
+  // per road via `markings.color`. `"auto"` (default) keeps the
+  // legacy heuristic (yellow on highway/avenue, white elsewhere);
+  // `"white"` / `"yellow"` force the explicit choice for both the
+  // centre line and the lane dividers. Edge lines stay white in all
+  // cases (Brazilian convention).
+  const markingColor = obj.markings.color ?? "auto";
   const edgeColor = "#f5f5f5";
   const centerColor =
-    obj.road_style === "highway" || obj.road_style === "avenue"
+    markingColor === "yellow"
       ? "#fde047"
-      : "#f5f5f5";
+      : markingColor === "white"
+        ? "#f5f5f5"
+        : obj.road_style === "highway" || obj.road_style === "avenue"
+          ? "#fde047"
+          : "#f5f5f5";
+  // MVP 10 Round 5 — closed-loop flag. Konva.Line gets `closed`
+  // when set, which:
+  //   - skips end caps (so rotatórias don't grow weird bulbs at the
+  //     join);
+  //   - tells Konva to draw the closing segment using the same
+  //     `tension` and `lineJoin`, producing a clean ring;
+  //   - we also suppress the centre line when closed (a roundabout
+  //     with a yellow stripe across it is wrong by construction;
+  //     OSM `junction=roundabout` already forces `markings.center_line
+  //     = "none"` but other closed loops might still try — we drop
+  //     the centre marking unconditionally for closed paths).
+  const isClosed = obj.closed_path === true;
 
   const crosswalkStripes = useMemo(() => {
     const out: number[][] = [];
@@ -1275,8 +1424,12 @@ function RoadNode({
           stroke={obj.curb.color}
           strokeWidth={obj.width + obj.curb.width * 2}
           tension={tension}
-          lineCap="round"
+          // Round caps make sense on open polylines but produce
+          // visible "bulbs" at the start/end of a closed ring. Use
+          // butt caps when closed — the lineJoin handles the seam.
+          lineCap={isClosed ? "butt" : "round"}
           lineJoin="round"
+          closed={isClosed}
           listening={false}
         />
       )}
@@ -1285,8 +1438,9 @@ function RoadNode({
         stroke={obj.surface.fill}
         strokeWidth={obj.width}
         tension={tension}
-        lineCap="round"
+        lineCap={isClosed ? "butt" : "round"}
         lineJoin="round"
+        closed={isClosed}
         hitStrokeWidth={Math.max(obj.width + 8, 20)}
       />
       {laneDividerSegments.map((pts, i) => (

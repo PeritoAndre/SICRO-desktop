@@ -15,6 +15,8 @@ pub mod export_commands;
 pub mod image_commands;
 pub mod import_commands;
 pub mod laudo_commands;
+pub mod laudo_photo_drop;
 pub mod registry_commands;
+pub mod sigdocs_commands;
 pub mod video_commands;
 pub mod workspace_commands;

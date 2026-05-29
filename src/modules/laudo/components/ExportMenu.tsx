@@ -15,14 +15,7 @@ import {
 } from "lucide-react";
 import { commands } from "@core/commands";
 import { toSicroError } from "@core/errors";
-import {
-  collectEvidencePaths,
-  loadBrandingAssets,
-  loadEvidenceAssets,
-  normalizeEvidenceSrcsForSave,
-  renderSicroDocToHtml,
-  type SicroDoc,
-} from "../document-engine";
+import { type SicroDoc } from "../document-engine";
 import { formatRelative } from "@core/formatters";
 import type { Export } from "@domain/export";
 import styles from "./ExportMenu.module.css";
@@ -82,49 +75,49 @@ export function ExportMenu({
   const runExport = async (target: "html" | "pdf" | "docx") => {
     if (!doc) return;
     setStatus({ kind: "running", target });
+    const { pushToast, dismissToast } = await import(
+      "@/components/toast/toastStore"
+    );
+    const toastId = pushToast(
+      "progress",
+      `Exportando ${target.toUpperCase()}…`,
+      { title: "Exportação" },
+    );
     try {
-      let result: Export;
-      if (target === "docx") {
-        // DOCX reads the .sicrodoc directly on the Rust side — no HTML needed.
-        result = await commands.exportLaudoDocx(workspacePath, laudoId);
-      } else {
-        // Branding assets are baked into the HTML as data URIs so the Edge
-        // headless print-to-pdf step (which reads the HTML from a temp file)
-        // can show the coats of arms without resolving /branding/ paths.
-        const branding = await loadBrandingAssets();
-        // MVP 4: collect every figure/storyboard `relative_path` and
-        // load its bytes through the Rust backend, then hand them to the
-        // renderer for data-URI inlining. Without this the headless
-        // PDF/HTML target can't read evidence files via tauri://.
-        const portableContent = normalizeEvidenceSrcsForSave(doc.content);
-        const evidencePaths = collectEvidencePaths(portableContent);
-        const evidenceAssets =
-          evidencePaths.size > 0
-            ? await loadEvidenceAssets(workspacePath, evidencePaths)
-            : null;
-        const html = renderSicroDocToHtml(
-          { ...doc, content: portableContent },
-          {
-            fullDocument: true,
-            occurrence: occurrence ?? null,
-            branding,
-            evidenceAssets,
-          },
-        );
-        result =
-          target === "pdf"
-            ? await commands.exportLaudoPdf(workspacePath, laudoId, html)
-            : await commands.exportLaudoHtml(workspacePath, laudoId, html);
-      }
+      // K — Usa o helper unificado `exportLaudo` que (1) chama o
+      // pipeline correto pra cada formato e (2) abre o Explorer na
+      // pasta do arquivo gerado (revealAfter=true por padrão). O
+      // perito já encontra o arquivo aberto pra arrastar pra outro
+      // app (SIGDOC, Outlook, etc.).
+      const { exportLaudo } = await import("../services/laudoExport");
+      const { export: result } = await exportLaudo(
+        target,
+        workspacePath,
+        laudoId,
+        doc,
+        (occurrence as Record<string, unknown> | null) ?? null,
+        { revealAfter: true },
+      );
       setStatus({ kind: "success", path: result.relative_path });
-      // Refresh recents
+      dismissToast(toastId);
+      pushToast(
+        "success",
+        `${target.toUpperCase()} gerado em ${result.relative_path} — pasta aberta no Explorer.`,
+        {
+          title: "Exportação concluída",
+          durationMs: 6000,
+        },
+      );
       try {
         setRecent(await commands.listLaudoExports(workspacePath, laudoId));
       } catch {
         /* ignored */
       }
     } catch (err) {
-      setStatus({ kind: "error", message: toSicroError(err).message });
+      const msg = toSicroError(err).message;
+      setStatus({ kind: "error", message: msg });
+      dismissToast(toastId);
+      pushToast("error", msg, { title: "Falha na exportação" });
     }
   };
 

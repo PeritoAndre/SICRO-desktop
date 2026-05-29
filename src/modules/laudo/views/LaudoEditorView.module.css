@@ -75,3 +75,29 @@
   padding: var(--space-2) var(--space-4);
   font-size: var(--text-sm);
 }
+
+/* F12.7 — Print/PDF: o pipeline oficial é Ctrl+P → export Edge headless,
+   mas se o usuário acionar o print nativo do browser, escondemos toda a
+   chrome (toolbar, statusbar, inspector, banners) e deixamos só o
+   conteúdo do editor visível. As páginas reais já estão em formato A4
+   no pageStack. */
+@media print {
+  .headerRow,
+  .errorBanner {
+    display: none !important;
+  }
+  .root {
+    background: #fff !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .body {
+    overflow: visible !important;
+    display: block !important;
+  }
+  .editorRegion {
+    overflow: visible !important;
+  }
+  /* Inspector + status bar (sub-roots) escondidos pelo seletor global
+     em styles.css; aqui só removemos a chrome do view. */
+}

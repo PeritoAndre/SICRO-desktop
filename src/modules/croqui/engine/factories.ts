@@ -19,6 +19,7 @@ import type {
   SicroMeasurementObject,
   SicroPoint,
   SicroRoadObject,
+  SicroRoundaboutObject,
   SicroTextObject,
   SicroVehicleObject,
   VehicleBodyType,
@@ -373,6 +374,67 @@ export function makeRoad(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Road Engine 2.0 Ciclo 2 — Rotatória primitiva.
+//
+// Defaults: anel de 80 px de raio externo + 14 px de largura → ilha de
+// 66 px de raio. Suficiente para uma rotatória "padrão" cidade pequena
+// (~28 m de diâmetro a 18 px/m). O perito reescala depois.
+//
+// `surface.fill` segue o estilo `urban` (asfalto cinza escuro). `curb`
+// fica desabilitado por default — habilitar adiciona um anel colorido
+// externo ao asfalto (rebaixamento típico de praça central).
+
+/**
+ * Default radius / width used when nothing is supplied.
+ *
+ * Ciclo 2 v6 — defaults proporcionais melhores. Premissa: rotatória
+ * "urbana padrão" para via urbana de 80 px (~4,4 m a 18 px/m).
+ *
+ *   - `r = 144`  (≈ 16 m de diâmetro a 18 px/m — mini-rotatória)
+ *   - `width = 56` (faixa de circulação ~3 m — passagem de carro)
+ *   - inner radius implícito = 88 px (≈ 10 m — ilha confortável)
+ *
+ * Mesmo cálculo que o `computeAutoDimensions(roads: [80px])` em
+ * `roundaboutNode.ts`. Os defaults aqui são para o caso "rotatória
+ * inserida sem vias conectadas" — o perito ainda pode mexer no
+ * Inspector, e quando ligar vias e clicar "Recalcular proporção" a
+ * rotatória se re-dimensiona.
+ */
+const ROUNDABOUT_DEFAULTS = {
+  r: 144,
+  width: 56,
+  lane_count: 1,
+  surface_fill: "#3f3f46",
+  inner_color: "#e5e7eb",
+  border_color: "#f5f5f5",
+};
+
+export function makeRoundabout(
+  p: SicroPoint,
+  label = "R1",
+  overrides: Partial<SicroRoundaboutObject> = {},
+): SicroRoundaboutObject {
+  return {
+    id: uid("roundabout"),
+    layer_id: OBJECT_LAYER,
+    kind: "roundabout",
+    cx: p.x,
+    cy: p.y,
+    r: ROUNDABOUT_DEFAULTS.r,
+    width: ROUNDABOUT_DEFAULTS.width,
+    lane_count: ROUNDABOUT_DEFAULTS.lane_count,
+    surface: { fill: ROUNDABOUT_DEFAULTS.surface_fill, texture: "none" },
+    inner_color: ROUNDABOUT_DEFAULTS.inner_color,
+    border_color: ROUNDABOUT_DEFAULTS.border_color,
+    label,
+    visible: true,
+    locked: false,
+    category: "vias",
+    ...overrides,
+  };
+}
+
 export function makeMeasurement(
   p1: SicroPoint,
   p2: SicroPoint,
@@ -396,7 +458,8 @@ export function cloneObject<T extends SicroVehicleObject
   | SicroMarkerObject
   | SicroTextObject
   | SicroMeasurementObject
-  | SicroRoadObject>(source: T): T {
+  | SicroRoadObject
+  | SicroRoundaboutObject>(source: T): T {
   const cloned = { ...source } as T;
   cloned.id = uid(source.kind);
   // Nudge so the duplicate doesn't overlap the source visually.
@@ -415,6 +478,12 @@ export function cloneObject<T extends SicroVehicleObject
     cloned.points = source.kind === "road"
       ? source.points.map((v) => v + 16)
       : cloned.points;
+  }
+  if (cloned.kind === "roundabout") {
+    if (source.kind === "roundabout") {
+      cloned.cx = source.cx + 16;
+      cloned.cy = source.cy + 16;
+    }
   }
   if (cloned.kind === "measurement") {
     if (source.kind === "measurement") {

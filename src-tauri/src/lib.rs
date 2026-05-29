@@ -38,6 +38,21 @@ pub fn run() {
     // siblings are not carried over by a `pub use` re-export.
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        // H — Plugins para o fluxo gov.br (abrir browser + copiar caminho).
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        // I/J — Estado em memória do cover SIGDOC (mantém os bounds
+        // atuais para o listener de resize reposicionar a janela
+        // secundária que cobre a área do editor).
+        .manage(commands::sigdocs_commands::SigdocsCoverState::default())
+        .setup(|app| {
+            // J — Instala o listener de resize/move na main window para
+            // reposicionar o cover do SIGDOC quando a janela muda.
+            commands::sigdocs_commands::install_cover_resize_listener(
+                &app.handle().clone(),
+            );
+            Ok(())
+        })
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             // workspace / occurrence
@@ -51,6 +66,10 @@ pub fn run() {
             commands::laudo_commands::list_laudos,
             commands::laudo_commands::read_laudo,
             commands::laudo_commands::save_laudo,
+            // H — Fluxo gov.br externo
+            commands::laudo_commands::import_signed_pdf,
+            // O — Drag & drop de fotos no editor de laudo
+            commands::laudo_photo_drop::import_dragged_photos_to_laudo,
             // export (Spike C)
             commands::export_commands::export_laudo_html,
             commands::export_commands::export_laudo_pdf,
@@ -112,10 +131,27 @@ pub fn run() {
             commands::image_commands::read_image_asset,
             commands::image_commands::get_image_metadata,
             commands::image_commands::list_image_operation_logs,
+            // G12 — Image Engine Pro
+            commands::image_commands::compute_image_histogram,
+            commands::image_commands::apply_operation_preview,
+            commands::image_commands::apply_operation_stack,
+            commands::image_commands::generate_image_analysis_report,
             // consolidação alpha (MVP 8)
             commands::alpha_commands::generate_workspace_backup,
             commands::alpha_commands::get_system_health_snapshot,
             commands::alpha_commands::generate_system_health_report,
+            // I/J — Integração SIGDOC (janela secundária + cover webview)
+            commands::sigdocs_commands::get_sigdocs_url,
+            commands::sigdocs_commands::open_sigdocs_window,
+            commands::sigdocs_commands::close_sigdocs_window,
+            commands::sigdocs_commands::open_sigdocs_cover,
+            commands::sigdocs_commands::update_sigdocs_cover_bounds,
+            commands::sigdocs_commands::close_sigdocs_cover,
+            commands::sigdocs_commands::reveal_path_in_explorer,
+            // K — Credenciais SIGDOC (Windows Credential Manager)
+            commands::sigdocs_commands::save_sigdoc_credentials,
+            commands::sigdocs_commands::get_sigdoc_credentials_status,
+            commands::sigdocs_commands::delete_sigdoc_credentials,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SICRO Desktop");

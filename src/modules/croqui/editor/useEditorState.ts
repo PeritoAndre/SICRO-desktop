@@ -81,7 +81,10 @@ export type Tool =
   | "road_avenue"
   | "road_highway"
   | "road_dirt"
-  | "road_parking";
+  | "road_parking"
+  // Road Engine 2.0 Ciclo 2 — rotatória primitiva. Click once para
+  // inserir uma rotatória default no ponto clicado.
+  | "roundabout";
 
 /** Stage of a two-click tool (measurement / set_scale / line). */
 export interface PendingTwoClick {
@@ -116,6 +119,11 @@ export function useEditorState() {
   const [roadDraft, setRoadDraft] = useState<RoadDraft | null>(null);
   const [viewport, setViewport] = useState<Viewport>(DEFAULT_VIEWPORT);
   const [pointerWorld, setPointerWorld] = useState<SicroPoint>({ x: 0, y: 0 });
+  /**
+   * Road Engine 2.0 — Debug overlay toggle (Fase F4). Transient: vive
+   * só nesse hook, não é persistido no `.sicrocroqui`. Default OFF.
+   */
+  const [roadDebugV2, setRoadDebugV2] = useState(false);
   /** Undo stack: snapshots of `objects` arrays before each mutation. */
   const [history, setHistory] = useState<SicroObject[][]>([]);
   /** Redo stack (MVP 6) — fed by undo, cleared on a fresh mutation. */
@@ -178,6 +186,8 @@ export function useEditorState() {
     redoStack,
     pushRedo,
     popRedo,
+    roadDebugV2,
+    setRoadDebugV2,
   };
 }
 

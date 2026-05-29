@@ -205,22 +205,9 @@ fn build_sidecar(
 }
 
 fn operation_to_value(op: &BackendOperation) -> Value {
-    match op {
-        BackendOperation::Rotate90Cw => json!({"kind": "rotate_90_cw"}),
-        BackendOperation::Rotate90Ccw => json!({"kind": "rotate_90_ccw"}),
-        BackendOperation::Rotate180 => json!({"kind": "rotate_180"}),
-        BackendOperation::FlipHorizontal => json!({"kind": "flip_horizontal"}),
-        BackendOperation::FlipVertical => json!({"kind": "flip_vertical"}),
-        BackendOperation::Crop {
-            x,
-            y,
-            width,
-            height,
-        } => json!({"kind": "crop", "x": x, "y": y, "width": width, "height": height}),
-        BackendOperation::Resize { width, height } => {
-            json!({"kind": "resize", "width": width, "height": height})
-        }
-    }
+    // Usa serde_json::to_value para preservar tag+params automaticamente.
+    // Fallback para "unknown" se a serialização falhar (não deveria).
+    serde_json::to_value(op).unwrap_or_else(|_| json!({"kind": "unknown"}))
 }
 
 // Build a filesystem-safe slug from the analysis title.
