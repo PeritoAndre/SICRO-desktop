@@ -10,12 +10,18 @@
  *
  * Inverse direction is trivial: `JSON.stringify(doc)` works because the
  * shape is plain data — no class instances.
+ *
+ * Fase S clean cut — vias/rotatórias legacy (`kind: "road"`, `kind:
+ * "roundabout"`) e os campos legacy `road_engine_version` / `parity_objects`
+ * são silenciosamente DESCARTADOS pelo coercer. Croquis antigos perdem
+ * essas primitivas (não eram distribuídos pra users) e voltam a abrir;
+ * o único motor de via passa a ser Python Parity Engine (kind:
+ * "road_parity" / "roundabout_parity").
  */
 
 import {
   CURRENT_SCHEMA_VERSION,
   type ObjectCategory,
-  type RoadEngineVersion,
   type SicroCroquiCanvas,
   type SicroCroquiDoc,
   type SicroCroquiExportSettings,
@@ -70,6 +76,21 @@ const DEFAULT_LAYERS: SicroCroquiLayer[] = [
   },
 ];
 
+/**
+ * Conjunto de `kind`s suportados pelo Fase S. Qualquer objeto com `kind`
+ * fora desta lista é descartado pelo coercer (caso típico: croquis
+ * pré-S com `kind: "road"` / `kind: "roundabout"` do engine v1/v2).
+ */
+const SUPPORTED_KINDS = new Set<string>([
+  "vehicle",
+  "line",
+  "marker",
+  "text",
+  "measurement",
+  "road_parity",
+  "roundabout_parity",
+]);
+
 export function coerceCroquiDoc(raw: unknown): SicroCroquiDoc {
   if (!raw || typeof raw !== "object") {
     throw new Error("invalid .sicrocroqui: not an object");
@@ -84,26 +105,42 @@ export function coerceCroquiDoc(raw: unknown): SicroCroquiDoc {
   const layers = Array.isArray(o.layers)
     ? (o.layers as SicroCroquiLayer[])
     : DEFAULT_LAYERS;
-  // MVP 6: assign a default `category` to every object the older schema
-  // didn't carry one for. This is purely additive — old envelopes load
-  // without intervention and the new field merely fuels the layer panel.
+
+  // Fase S — descarta silenciosamente objetos legacy (`kind: "road"`,
+  // `kind: "roundabout"`, ou qualquer `kind` fora do conjunto suportado).
+  // Os demais ganham `category` default se ausente.
   //
-  // Road Engine 2.0 Ciclo 2 — also runs `coerceRoundaboutObject` on
-  // `kind === "roundabout"` entries so malformed roundabouts (missing
-  // cx/cy/r/width, or numeric NaN) drop silently instead of crashing
-  // the renderer. Other kinds pass through as before.
-  const objects = Array.isArray(o.objects)
-    ? (o.objects as SicroObject[])
-        .map((obj) => {
-          if (obj && obj.kind === "roundabout") {
-            return coerceRoundaboutObject(obj);
-          }
-          return obj
-            ? { ...obj, category: obj.category ?? inferCategory(obj) }
-            : obj;
-        })
-        .filter((obj): obj is SicroObject => obj !== null)
-    : [];
+  // Não há migração para parity — quem precisar de via abre o croqui
+  // e recria. Decisão consciente do usuário: croquis antigos não eram
+  // distribuídos pra outros peritos.
+  const objects: SicroObject[] = [];
+  if (Array.isArray(o.objects)) {
+    for (const rawObj of o.objects as unknown[]) {
+      if (!rawObj || typeof rawObj !== "object") continue;
+      const probe = rawObj as { kind?: unknown };
+      if (typeof probe.kind !== "string" || !SUPPORTED_KINDS.has(probe.kind)) {
+        continue;
+      }
+      const typed = rawObj as SicroObject;
+      objects.push({ ...typed, category: typed.category ?? inferCategory(typed) } as SicroObject);
+    }
+  }
+
+  // Fase S — Se o envelope antigo carrega `parity_objects` (Fase H.1),
+  // são absorvidos pelo array `objects` principal. O coercer só aceita
+  // formas válidas; outras passam sem validação fina (qualquer regressão
+  // seria detectada como `kind` desconhecido).
+  if (Array.isArray(o.parity_objects)) {
+    for (const rawObj of o.parity_objects as unknown[]) {
+      if (!rawObj || typeof rawObj !== "object") continue;
+      const probe = rawObj as { kind?: unknown };
+      if (typeof probe.kind !== "string" || !SUPPORTED_KINDS.has(probe.kind)) {
+        continue;
+      }
+      const typed = rawObj as SicroObject;
+      objects.push({ ...typed, category: typed.category ?? inferCategory(typed) } as SicroObject);
+    }
+  }
 
   return {
     schema_version:
@@ -128,111 +165,7 @@ export function coerceCroquiDoc(raw: unknown): SicroCroquiDoc {
     ...(Array.isArray(o.osm_imports)
       ? { osm_imports: coerceOsmImports(o.osm_imports) }
       : {}),
-    // Road Engine 2.0 — feature flag aditivo. Default "v1" para
-    // qualquer envelope que não carregue o campo (todos os croquis
-    // pré-Road Engine 2.0 ⇒ renderizam com v1 sem mudança).
-    road_engine_version: coerceRoadEngineVersion(o.road_engine_version),
-    // Fase H — Python Parity Engine. Array opcional. Passa intacto
-    // (sem coercer dedicado) — H.4 introduzirá `coerceParityObject`
-    // quando a migration entrar em jogo. Por enquanto Fase H.1 só
-    // aceita objetos shape-correto e os passa direto.
-    ...(Array.isArray(o.parity_objects)
-      ? { parity_objects: o.parity_objects as SicroCroquiDoc["parity_objects"] }
-      : {}),
   };
-}
-
-function coerceRoadEngineVersion(raw: unknown): RoadEngineVersion {
-  if (raw === "parity") return "parity";
-  if (raw === "v2") return "v2";
-  // Anything else (undefined, "v1", invalid string) → v1.
-  return "v1";
-}
-
-// ---------------------------------------------------------------------------
-// Road Engine 2.0 Ciclo 2 — roundabout coercer.
-//
-// Rotatórias têm 4 campos obrigatórios geometricamente: cx, cy, r e
-// width. Sem qualquer um deles a primitiva não pode ser desenhada.
-// Em vez de deixar o renderer crashar (ou desenhar um anel
-// degenerado em (0,0)), aqui filtramos o objeto retornando `null`.
-//
-// O coercer:
-//   - retorna null quando o objeto não tem cx/cy/r/width numéricos válidos;
-//   - usa defaults seguros para `surface`, cores e flags;
-//   - preserva `id`, `label`, `category`, `metadata_json` quando presentes;
-//   - injeta `category: "vias"` quando ausente.
-
-function coerceRoundaboutObject(raw: unknown): SicroObject | null {
-  if (!raw || typeof raw !== "object") return null;
-  const o = raw as Record<string, unknown>;
-  const cx = typeof o.cx === "number" && Number.isFinite(o.cx) ? o.cx : null;
-  const cy = typeof o.cy === "number" && Number.isFinite(o.cy) ? o.cy : null;
-  const r =
-    typeof o.r === "number" && Number.isFinite(o.r) && o.r > 0 ? o.r : null;
-  const width =
-    typeof o.width === "number" &&
-    Number.isFinite(o.width) &&
-    o.width > 0 &&
-    o.width < (r ?? 0)
-      ? o.width
-      : null;
-  if (cx === null || cy === null || r === null || width === null) {
-    return null;
-  }
-  const surface =
-    o.surface && typeof o.surface === "object"
-      ? (o.surface as { fill?: unknown; texture?: unknown })
-      : {};
-  const fill =
-    typeof surface.fill === "string" ? surface.fill : "#3f3f46";
-  const curbRaw =
-    o.curb && typeof o.curb === "object"
-      ? (o.curb as { enabled?: unknown; width?: unknown; color?: unknown })
-      : null;
-  const curb = curbRaw
-    ? {
-        enabled: curbRaw.enabled === true,
-        width:
-          typeof curbRaw.width === "number" && curbRaw.width >= 0
-            ? curbRaw.width
-            : 0,
-        color: typeof curbRaw.color === "string" ? curbRaw.color : "#475569",
-      }
-    : undefined;
-  const out: SicroObject = {
-    id: typeof o.id === "string" && o.id.length > 0 ? o.id : `rb_${Date.now()}`,
-    layer_id:
-      typeof o.layer_id === "string" && o.layer_id.length > 0
-        ? o.layer_id
-        : "layer_objects",
-    kind: "roundabout",
-    cx,
-    cy,
-    r,
-    width,
-    surface: { fill, texture: "none" },
-    label: typeof o.label === "string" ? o.label : null,
-    visible: o.visible !== false,
-    locked: o.locked === true,
-    category: "vias",
-    ...(typeof o.inner_color === "string"
-      ? { inner_color: o.inner_color }
-      : {}),
-    ...(typeof o.border_color === "string"
-      ? { border_color: o.border_color }
-      : {}),
-    ...(curb ? { curb } : {}),
-    ...(typeof o.metadata_json === "string"
-      ? { metadata_json: o.metadata_json }
-      : {}),
-    ...(typeof o.lane_count === "number" &&
-    Number.isFinite(o.lane_count) &&
-    o.lane_count >= 1
-      ? { lane_count: Math.round(o.lane_count) }
-      : {}),
-  };
-  return out;
 }
 
 function coerceOsmImports(raw: unknown[]): SicroCroquiDoc["osm_imports"] {
@@ -384,11 +317,9 @@ export function inferCategory(obj: SicroObject): ObjectCategory {
       return "medidas";
     case "text":
       return "anotacoes";
-    case "road":
-      return "vias";
-    case "roundabout":
-      // Rotatória primitiva (Road Engine 2.0 Ciclo 2). Mesma camada
-      // que as vias para o layer panel.
+    case "road_parity":
+    case "roundabout_parity":
+      // Vias e rotatórias parity vão para a camada "vias".
       return "vias";
     case "line":
       if (obj.subtype === "r1" || obj.subtype === "r2") return "referenciais";

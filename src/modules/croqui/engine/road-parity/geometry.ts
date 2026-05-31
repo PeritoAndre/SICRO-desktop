@@ -208,8 +208,9 @@ export function buildRoundaboutRings(
 export function buildRoundaboutDiskPolygon(
   rb: SicroRoundaboutObject_parity,
   segments = 48,
+  paddingM = 0,
 ): Vec2World[] {
-  const r = rb.r_m + rb.largura_m / 2;
+  const r = rb.r_m + rb.largura_m / 2 + paddingM;
   const out: Vec2World[] = [];
   for (let i = 0; i < segments; i++) {
     const t = (i / segments) * Math.PI * 2;
@@ -259,4 +260,189 @@ export function flattenVec2(pts: ReadonlyArray<Vec2World>): number[] {
     out.push(p.x, p.y);
   }
   return out;
+}
+
+/**
+ * Discretiza um círculo (ou arco) em uma polyline com `segments`
+ * vértices. Útil para clipping geométrico — `clipPolylineAgainstPolygons`
+ * pode então cortar o anel contra polígonos de asfalto de vias,
+ * deixando o asfalto contínuo nas junções sem precisar de gaps
+ * angulares heurísticos.
+ *
+ * Default `segments = 96` — denso o suficiente para 1 px de erro
+ * radial em raios urbanos típicos.
+ *
+ * `endAngle - startAngle` deve estar em [0, 2π]. Quando `2π`, gera um
+ * loop completo (último ponto == primeiro).
+ */
+export function discretizeCircle(
+  cx: number,
+  cy: number,
+  r: number,
+  startAngle = 0,
+  endAngle = Math.PI * 2,
+  segments = 96,
+): Vec2World[] {
+  const out: Vec2World[] = [];
+  const span = endAngle - startAngle;
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const a = startAngle + span * t;
+    out.push({ x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Roundabout borders — gaps angulares onde as vias se conectam.
+//
+// Para deixar o asfalto contínuo no encontro de via↔rotatória, a borda
+// externa do anel deve "abrir" exatamente onde cada via toca o raio
+// externo. Mesma ideia que faríamos pra qualquer junção: detectar a
+// posição angular dos endpoints das vias que estão "encostando" no
+// círculo externo, e converter pra arcos visíveis (= complemento dos
+// gaps).
+//
+// Implementação:
+//   1. Para cada via, examina os dois endpoints (`a` e `b`).
+//   2. Se o endpoint está dentro de uma tolerância radial do anel,
+//      considera que toca: marca um gap centrado no ângulo do endpoint
+//      com largura angular = 2·atan(largura_via / 2 / r_anel).
+//   3. Normaliza gaps para [0, 2π), lida com wrap-around (gap que
+//      cruza 0 vira dois gaps).
+//   4. Mescla gaps sobrepostos.
+//   5. Devolve os arcos visíveis (complemento dos gaps).
+
+export interface AngleRange {
+  /** Ângulo de início em radianos, normalizado a [0, 2π). */
+  startAngle: number;
+  /** Ângulo de fim em radianos. Pode ser > 2π quando wrap-around (raro). */
+  endAngle: number;
+}
+
+const TWO_PI = Math.PI * 2;
+
+/** Normaliza ângulo para [0, 2π). */
+function norm2pi(a: number): number {
+  const x = a % TWO_PI;
+  return x < 0 ? x + TWO_PI : x;
+}
+
+/**
+ * Calcula a lista de arcos VISÍVEIS da borda externa da rotatória,
+ * com gaps onde as vias se conectam.
+ *
+ * Retorna `[]` se TODOS os 360° estão cobertos por vias (caso degen).
+ * Retorna `[{startAngle: 0, endAngle: 2π}]` se nenhuma via toca.
+ */
+export function computeRoundaboutBorderArcs(
+  rb: SicroRoundaboutObject_parity,
+  roads: ReadonlyArray<SicroRoadObject_parity>,
+): AngleRange[] {
+  const rOuter = rb.r_m;
+  if (rOuter <= 0) return [{ startAngle: 0, endAngle: TWO_PI }];
+
+  // Tolerância radial — uma via é considerada "tocando" o anel se seu
+  // endpoint está dentro deste raio do anel externo. Permissiva o
+  // suficiente para absorver pequenas variações de geometria do OSM.
+  const tolRadial = Math.max(rb.largura_m * 1.2, rOuter * 0.15);
+
+  // Coleta os gaps brutos (em ângulo absoluto, podem ser negativos ou > 2π).
+  const rawGaps: Array<[number, number]> = [];
+  for (const road of roads) {
+    if (road.visible === false) continue;
+    const endpoints: Array<{ x: number; y: number }> = [
+      { x: road.ax, y: road.ay },
+      { x: road.bx, y: road.by },
+    ];
+    for (const ep of endpoints) {
+      const dx = ep.x - rb.cx;
+      const dy = ep.y - rb.cy;
+      const dist = Math.hypot(dx, dy);
+      if (Math.abs(dist - rOuter) > tolRadial) continue;
+      const theta = Math.atan2(dy, dx);
+      // Largura angular do gap. Calculada exatamente como o ângulo
+      // onde a BORDA LATERAL da via cruza o raio externo do anel.
+      //
+      // Para uma via radial com largura `w` aproximando-se do anel de
+      // raio `R`, a borda lateral está a `w/2` perpendicular da
+      // centerline; o ponto de cruzamento com o círculo R está em
+      // `theta ± atan((w/2)/R)`. Usamos a aproximação small-angle
+      // `(w/2)/R` (erro < 1% para w << R).
+      //
+      // Usamos um overlap NEGATIVO de 1m (gap angular MENOR que a
+      // largura) para que as bordas do anel se estendam ligeiramente
+      // ATÉ as bordas laterais da via, criando uma junção em T
+      // suave em vez de um hiato visível.
+      //
+      // Clamp em π/3 (60°) pra não engolir o anel inteiro quando
+      // várias vias muito largas se conectam.
+      const effectiveWidthM = Math.max(road.largura_m - 1, road.largura_m * 0.5);
+      const halfAngle = Math.min(
+        Math.PI / 3,
+        effectiveWidthM / (2 * rOuter),
+      );
+      rawGaps.push([theta - halfAngle, theta + halfAngle]);
+    }
+  }
+
+  if (rawGaps.length === 0) {
+    return [{ startAngle: 0, endAngle: TWO_PI }];
+  }
+
+  // Normaliza para [0, 2π), tratando wrap-around.
+  // Se o gap [s, e] tem `s < 0 || e > 2π || s > e (após norm)`, divide
+  // em dois.
+  const normalized: Array<[number, number]> = [];
+  for (const [s, e] of rawGaps) {
+    const ns = norm2pi(s);
+    const ne = norm2pi(e);
+    if (ns <= ne) {
+      normalized.push([ns, ne]);
+    } else {
+      // Wrap: gap atravessa o 0.
+      normalized.push([ns, TWO_PI]);
+      normalized.push([0, ne]);
+    }
+  }
+
+  // Ordena por start, mescla sobrepostos.
+  normalized.sort((a, b) => a[0] - b[0]);
+  const merged: Array<[number, number]> = [];
+  for (const [s, e] of normalized) {
+    const last = merged[merged.length - 1];
+    if (last && s <= last[1]) {
+      last[1] = Math.max(last[1], e);
+    } else {
+      merged.push([s, e]);
+    }
+  }
+
+  // Calcula complemento: arcos visíveis entre os gaps.
+  const arcs: AngleRange[] = [];
+  let cursor = 0;
+  for (const [s, e] of merged) {
+    if (s > cursor) {
+      arcs.push({ startAngle: cursor, endAngle: s });
+    }
+    cursor = Math.max(cursor, e);
+  }
+  if (cursor < TWO_PI) {
+    arcs.push({ startAngle: cursor, endAngle: TWO_PI });
+  }
+
+  // Mescla o último arco com o primeiro se um termina em 2π e o outro
+  // começa em 0 (caso onde não há gap atravessando 0). Visualmente é a
+  // mesma coisa, mas evita uma transição entre arcos no ângulo 0.
+  if (arcs.length >= 2) {
+    const first = arcs[0]!;
+    const last = arcs[arcs.length - 1]!;
+    if (first.startAngle === 0 && last.endAngle === TWO_PI) {
+      // Junta o último com o primeiro virando um arco que cruza 0.
+      first.startAngle = last.startAngle - TWO_PI;
+      arcs.pop();
+    }
+  }
+
+  return arcs;
 }

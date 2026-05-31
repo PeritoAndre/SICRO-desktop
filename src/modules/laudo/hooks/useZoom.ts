@@ -4,11 +4,11 @@
  * O zoom é aplicado via CSS `transform: scale(...)` sobre o `EditorPage`.
  * Não altera o conteúdo do documento — só a renderização visual.
  *
- * Valores aceitos: 0.5 (50%) até 2.0 (200%), em incrementos de 0.1.
+ * Valores aceitos: 0.5 (50%) até 5.0 (500%), em incrementos de 0.1.
  *
  * Funcionalidades:
  *   - `zoom`             — valor atual (1.0 = 100%).
- *   - `setZoom(n)`       — define valor (clamp em [0.5, 2.0]).
+ *   - `setZoom(n)`       — define valor (clamp em [0.5, 5.0]).
  *   - `zoomIn()` / `zoomOut()` — incrementa/decrementa em 0.1.
  *   - `reset()`          — volta para 1.0.
  *   - `fitWidth()`       — ajusta para preencher a largura disponível.
@@ -25,7 +25,7 @@
 import { useCallback, useState } from "react";
 
 export const ZOOM_MIN = 0.5;
-export const ZOOM_MAX = 2.0;
+export const ZOOM_MAX = 5.0;
 export const ZOOM_STEP = 0.1;
 export const ZOOM_DEFAULT = 1.0;
 

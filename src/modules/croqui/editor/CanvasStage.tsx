@@ -1,7 +1,8 @@
 /**
  * CanvasStage — the Konva Stage + Layers + Shapes.
  *
- * Why React-Konva (vs SVG/Canvas/own engine): see SPIKE_E_*.md §1.
+ * Why React-Konva (vs SVG/Canvas/own engine): see
+ * `docs/archive/SPIKE_E_CROQUI_ENGINE_RELATORIO.md` §1.
  *
  * Layer split (each Layer is a separate <canvas> under the hood):
  *   - bgLayer        — grid + background image
@@ -15,7 +16,6 @@
 
 import {
   forwardRef,
-  useCallback,
   useEffect,
   useImperativeHandle,
   useMemo,
@@ -38,16 +38,9 @@ import type Konva from "konva";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   angleDeg,
-  clipPolylineAgainstCircles,
   distancePx,
-  endcapBasis,
   formatMeasurement,
-  junctionPolygonFromSegments,
   midpoint,
-  offsetPolyline,
-  pairsOf,
-  polylineIntersectionsDetailed,
-  type ClipCircle,
   type SicroCroquiBackgroundImage,
   type SicroCroquiDoc,
   type SicroLineObject,
@@ -55,38 +48,25 @@ import {
   type SicroMeasurementObject,
   type SicroObject,
   type SicroPoint,
-  type SicroRoadObject,
   type SicroTextObject,
   type SicroVehicleObject,
   type VehicleBodyType,
 } from "../engine";
-// Road Engine 2.0 — ribbon-polygon renderer. Activated per-croqui via
-// `doc.road_engine_version === "v2"`. v1 (this file's `RoadNode`)
-// remains the default and the fallback.
-//
-// `RoundaboutMeshNode` é a primitiva rotatória aditiva (Ciclo 2). Não
-// depende do flag v1/v2 — `kind: "roundabout"` é um tipo novo que só
-// existe a partir do Ciclo 2 e sempre renderiza com o motor v2.
-//
-// `buildRoadContext` / `RoadContext` modelam o conjunto de outras
-// vias que cada via deve consultar ao clipar suas próprias marcações
-// (Fase F). O contexto é construído uma vez por render do Stage.
-// `RoadMeshNode` continua exportado pelo road-v2 (singular renderer
-// de uma via, sem rede), mas o CanvasStage v2 usa `RoadNetworkLayerV2`
-// — o renderer global multipass que substituiu a abordagem
-// per-objeto do Ciclo 2 anterior.
-import {
-  RoadNetworkLayerV2,
-  RoundaboutMeshNode,
-} from "../engine/road-v2";
-// Fase H.3 — Python Parity Engine integrado atrás de feature flag
-// `road_engine_version === "parity"`. v1/v2 continuam intactos.
+// Fase S clean cut — Road v1 (RoadNode) e Road v2 (RoadNetworkLayerV2,
+// RoundaboutMeshNode) foram removidos. Vias e rotatórias são
+// EXCLUSIVAMENTE renderizadas pelo `RoadParityRenderer` do Python
+// Parity Engine.
 import {
   RoadParityRenderer,
   isParityObject,
   type SicroParityObject,
 } from "../engine/road-parity";
-import type { SicroRoundaboutObject } from "../engine";
+import {
+  getObjectBoundsStagePx,
+  rectFromPoints,
+  rectsIntersect,
+  translateObjectPatch,
+} from "./bounds";
 import type { EditorState, Tool } from "./useEditorState";
 
 export interface CanvasStageHandle {
@@ -96,11 +76,18 @@ export interface CanvasStageHandle {
 }
 
 /**
- * Stable empty array used as the default `clipZones` for RoadNode so
- * `useMemo` dependencies don't churn on every render. Hoisted to module
- * scope so React identity is preserved across renders.
+ * Limites de zoom do canvas do croqui. Generosos por design: peritos
+ * trabalham com arte vetorial detalhada (manchas de sangue, pegadas,
+ * fragmentos) e precisam de muito zoom de aproximação. Em cima a faixa
+ * cobre desde visão geral de cena ampla (5 %) até trabalho pixel-perfect
+ * em detalhes mínimos (10 000 % = 100×). Konva aguenta esse range sem
+ * problemas — o stage é Canvas2D, então não há custo de "DOM zoom".
  */
-const EMPTY_CLIP_ZONES: ClipCircle[] = [];
+export const CROQUI_ZOOM_MIN = 0.05;
+export const CROQUI_ZOOM_MAX = 100;
+/** Fator multiplicativo aplicado a cada "tick" do scroll wheel. */
+export const CROQUI_ZOOM_WHEEL_FACTOR_IN = 1.08;
+export const CROQUI_ZOOM_WHEEL_FACTOR_OUT = 0.92;
 
 /**
  * Sentinel `selectedId` used to mean "the user has clicked the
@@ -159,6 +146,20 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
   const stageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const objectsLayerRef = useRef<Konva.Layer | null>(null);
+  // Flag pra evitar que o click logo após mouseUp do marquee limpe
+  // a seleção recém-criada. Browser emite mousedown→mouseup→click como
+  // 3 eventos separados; cancelBubble no mouseUp não impede o click.
+  const justFinishedMarqueeRef = useRef(false);
+  // Sessão de drag em grupo: quando o usuário arrasta um objeto que
+  // está em `selectedIds` (com mais de 1 item), snapshotamos as posições
+  // dos OUTROS aqui pra sincronizar visualmente durante o drag e
+  // commitar via `onObjectChange` no final.
+  const dragSessionRef = useRef<{
+    draggedId: string;
+    startX: number;
+    startY: number;
+    others: Array<{ id: string; startX: number; startY: number }>;
+  } | null>(null);
 
   useImperativeHandle(ref, () => ({
     toPng(pixelRatio = 2) {
@@ -174,24 +175,120 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     },
   }));
 
-  // Attach the Transformer to the currently-selected Konva node.
+  // Group drag — listeners de stage-level (eventos do Konva bubbleiam).
+  // Quando o usuário arrasta um objeto que está em `selectedIds` E há
+  // mais de 1 item selecionado, snapshotamos as posições dos OUTROS
+  // no dragstart, sincronizamos visualmente durante dragmove (direto
+  // no Konva, sem state), e commitamos via onObjectChange no dragend.
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+
+    const dragStart = (e: Konva.KonvaEventObject<DragEvent>) => {
+      const node = e.target;
+      // O target é o Konva.Group/Shape do objeto. Pega o id.
+      const id = typeof node.id === "function" ? node.id() : undefined;
+      if (!id) return;
+      if (!editor.selectedIds.includes(id)) return;
+      if (editor.selectedIds.length <= 1) return; // single = drag normal
+
+      const layer = objectsLayerRef.current;
+      if (!layer) return;
+      const others: Array<{ id: string; startX: number; startY: number }> = [];
+      for (const sid of editor.selectedIds) {
+        if (sid === id) continue;
+        const other = layer.findOne(`#${sid}`);
+        if (other) {
+          others.push({ id: sid, startX: other.x(), startY: other.y() });
+        }
+      }
+      dragSessionRef.current = {
+        draggedId: id,
+        startX: node.x(),
+        startY: node.y(),
+        others,
+      };
+    };
+
+    const dragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
+      const session = dragSessionRef.current;
+      if (!session) return;
+      const node = e.target;
+      const id = typeof node.id === "function" ? node.id() : undefined;
+      if (id !== session.draggedId) return;
+      const dx = node.x() - session.startX;
+      const dy = node.y() - session.startY;
+      const layer = objectsLayerRef.current;
+      if (!layer) return;
+      for (const o of session.others) {
+        const other = layer.findOne(`#${o.id}`);
+        if (other) {
+          other.position({ x: o.startX + dx, y: o.startY + dy });
+        }
+      }
+      layer.batchDraw();
+    };
+
+    const dragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
+      const session = dragSessionRef.current;
+      if (!session) return;
+      const node = e.target;
+      const id = typeof node.id === "function" ? node.id() : undefined;
+      if (id !== session.draggedId) return;
+      const dx = node.x() - session.startX;
+      const dy = node.y() - session.startY;
+      dragSessionRef.current = null;
+      if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) return;
+
+      // Commit cada um dos OUTROS via o callback apropriado (parity vs
+      // não-parity). O dragged é commitado pelo handler dele próprio
+      // (no renderer específico do tipo).
+      const pxPerM = doc.scale?.px_per_m ?? 1;
+      for (const o of session.others) {
+        const obj = doc.objects.find((x) => x.id === o.id);
+        if (!obj) continue;
+        const patch = translateObjectPatch(obj, dx, dy, pxPerM);
+        if (!patch) continue;
+        if (isParityObject(obj)) {
+          onParityObjectChange?.(o.id, patch as Partial<SicroParityObject>);
+        } else {
+          onObjectChange(o.id, patch);
+        }
+      }
+    };
+
+    // Namespace `.group` permite remover só esses handlers no cleanup
+    // sem afetar outros listeners eventualmente atachados ao stage.
+    stage.on("dragstart.group", dragStart);
+    stage.on("dragmove.group", dragMove);
+    stage.on("dragend.group", dragEnd);
+    return () => {
+      stage.off("dragstart.group");
+      stage.off("dragmove.group");
+      stage.off("dragend.group");
+    };
+  }, [editor.selectedIds, doc, onObjectChange, onParityObjectChange]);
+
+  // Attach the Transformer to the currently-selected Konva node(s).
+  // Multi-select via marquee: o Transformer aceita uma lista de nodes
+  // e desenha uma bounding box ao redor de todos eles.
   useEffect(() => {
     const transformer = transformerRef.current;
     const layer = objectsLayerRef.current;
     if (!transformer || !layer) return;
-    if (!editor.selectedId) {
+    if (editor.selectedIds.length === 0) {
       transformer.nodes([]);
       transformer.getLayer()?.batchDraw();
       return;
     }
-    const node = layer.findOne(`#${editor.selectedId}`);
-    if (node) {
-      transformer.nodes([node]);
-      transformer.getLayer()?.batchDraw();
-    } else {
-      transformer.nodes([]);
+    const nodes: Konva.Node[] = [];
+    for (const id of editor.selectedIds) {
+      const node = layer.findOne(`#${id}`);
+      if (node) nodes.push(node);
     }
-  }, [editor.selectedId, doc.objects]);
+    transformer.nodes(nodes);
+    transformer.getLayer()?.batchDraw();
+  }, [editor.selectedIds, doc.objects]);
 
   const handleStageMouseMove = () => {
     const stage = stageRef.current;
@@ -200,9 +297,87 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     if (!pos) return;
     const world = toWorld(stage, pos);
     editor.setPointerWorld(world);
+    // Marquee em curso: atualiza o canto "current" pra estender o
+    // retângulo conforme o cursor.
+    if (editor.marquee) {
+      editor.setMarquee({
+        ...editor.marquee,
+        currentWorldX: world.x,
+        currentWorldY: world.y,
+      });
+    }
+  };
+
+  // Marquee de seleção (rubber-band): no modo `select`, mousedown sobre
+  // a área vazia da stage inicia o drag de um retângulo. mousemove
+  // estende o retângulo (via handleStageMouseMove acima). mouseup
+  // computa quais objetos caem dentro e seleciona todos via
+  // `setSelectedIds`. Esc cancela.
+  const handleStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    // Sempre reseta a flag — novo gesto começa do zero.
+    justFinishedMarqueeRef.current = false;
+    if (editor.tool !== "select") return;
+    // Só inicia marquee quando o clique foi no FUNDO (não em um objeto).
+    if (e.target !== e.target.getStage()) return;
+    // Botão esquerdo apenas. Botão direito reservado pra menu contextual
+    // (que ainda não existe — futuro).
+    if (e.evt.button !== 0) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const pos = stage.getPointerPosition();
+    if (!pos) return;
+    const world = toWorld(stage, pos);
+    editor.setMarquee({
+      startWorldX: world.x,
+      startWorldY: world.y,
+      currentWorldX: world.x,
+      currentWorldY: world.y,
+    });
+  };
+
+  const handleStageMouseUp = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (!editor.marquee) return;
+    const m = editor.marquee;
+    editor.setMarquee(null);
+    // Se o usuário só clicou (sem arrastar — área < 9 px²), trata
+    // como deseleção (clique no vazio = limpar).
+    const rect = rectFromPoints(
+      m.startWorldX,
+      m.startWorldY,
+      m.currentWorldX,
+      m.currentWorldY,
+    );
+    const isTinyClick = rect.width * rect.height < 9;
+    if (isTinyClick) {
+      onSelect(null);
+      return;
+    }
+    // Hit test: pega todos os objetos cujo AABB intersecta o retângulo.
+    const pxPerM = doc.scale?.px_per_m ?? 1;
+    const hits: string[] = [];
+    for (const obj of doc.objects) {
+      const b = getObjectBoundsStagePx(obj, pxPerM);
+      if (rectsIntersect(b, rect)) hits.push(obj.id);
+    }
+    editor.setSelectedIds(hits);
+    // CRÍTICO — o browser emite `click` LOGO DEPOIS de mouseup (são
+    // eventos separados, cancelBubble do mouseup não afeta o click).
+    // Sem essa flag, o handleStageClick rodaria em seguida e chamaria
+    // onSelect(null), apagando a seleção recém-criada pelo marquee.
+    // A flag é resetada no próximo mousedown.
+    justFinishedMarqueeRef.current = true;
+    e.cancelBubble = true;
   };
 
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    // Se o usuário acabou de fazer um marquee com seleção, ignora o
+    // `click` espúrio que vem logo depois do mouseup — senão o
+    // onSelect(null) abaixo apagaria a seleção. A flag é resetada no
+    // próximo mousedown (handleStageMouseDown).
+    if (justFinishedMarqueeRef.current) {
+      justFinishedMarqueeRef.current = false;
+      return;
+    }
     // Clicks that hit an interactive node bubble through Konva; we only care
     // about clicks on empty canvas here.
     if (e.target !== e.target.getStage()) {
@@ -232,112 +407,19 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     onCanvasClick(world);
   };
 
-  // Road Engine Pro — split objects so we can render roads first, paint
-  // road-road junction polygons over their markings, then render
-  // everything else on top. Also build per-road "clip zones" so each
-  // RoadNode can physically skip drawing its markings (edge lines /
-  // center / lane dividers) inside any junction.
-  //
-  // Round 4 changes (seamless intersections):
-  //
-  //   1. The junction polygon is now over-sized by the curb width of
-  //      both roads, so the curb halo on either side is absorbed into
-  //      the patch — no grey leak around the corners.
-  //   2. We compute a `clipZones[roadId]` map (one bounding circle
-  //      around each junction polygon the road participates in). The
-  //      RoadNode uses these to literally skip drawing markings inside
-  //      the junction — so even if the patch were translucent (or the
-  //      colour mismatched), the lines wouldn't shimmer through.
-  const {
-    roadObjects,
-    nonRoadObjects,
-    roundaboutObjects,
-    intersectionPatches,
-    clipZonesByRoad,
-  } =
-    useMemo(() => {
-      const roads: SicroRoadObject[] = [];
-      const others: SicroObject[] = [];
-      for (const o of doc.objects) {
-        if (o.kind === "road") roads.push(o);
-        else others.push(o);
-      }
-      type Patch = {
-        id: string;
-        polygon: SicroPoint[];
-        fill: string;
-      };
-      const patches: Patch[] = [];
-      const zones: Record<string, ClipCircle[]> = {};
-      for (let i = 0; i < roads.length; i++) {
-        const ri = roads[i] as SicroRoadObject;
-        if (ri.visible === false) continue;
-        for (let j = i + 1; j < roads.length; j++) {
-          const rj = roads[j] as SicroRoadObject;
-          if (rj.visible === false) continue;
-          const xs = polylineIntersectionsDetailed(ri.points, rj.points);
-          for (let k = 0; k < xs.length; k++) {
-            const hit = xs[k]!;
-            // Over-size by the curb width of EACH road so the patch
-            // covers the curb halo, not just the asphalt body. This is
-            // what makes the intersection look like one continuous
-            // piece — no curb leaks past the patch corners.
-            const padA = ri.curb.enabled ? ri.curb.width : 0;
-            const padB = rj.curb.enabled ? rj.curb.width : 0;
-            const poly = junctionPolygonFromSegments(
-              ri.points,
-              hit.iSegment,
-              ri.width / 2 + padA + padB,
-              rj.points,
-              hit.jSegment,
-              rj.width / 2 + padA + padB,
-              hit.point,
-            );
-            patches.push({
-              id: `xs_${ri.id}_${rj.id}_${k}`,
-              polygon: poly,
-              // Use the wider road's surface fill — that's usually the
-              // road the eye expects to be "dominant" at the junction.
-              fill:
-                ri.width >= rj.width
-                  ? ri.surface.fill
-                  : rj.surface.fill,
-            });
-            // The clip circle for each participating road bounds the
-            // polygon — its corners (relative to the crossing point)
-            // are at most `r = max corner-to-center distance` away.
-            // Markings within that radius will be physically skipped.
-            const radius = Math.max(
-              ...poly.map((p) =>
-                Math.hypot(p.x - hit.point.x, p.y - hit.point.y),
-              ),
-            );
-            const clip: ClipCircle = {
-              x: hit.point.x,
-              y: hit.point.y,
-              r: radius,
-            };
-            (zones[ri.id] ??= []).push(clip);
-            (zones[rj.id] ??= []).push(clip);
-          }
-        }
-      }
-      // Road Engine 2.0 — separa rotatórias dos `others` para que o
-      // `RoadNetworkLayerV2` possa renderizá-las em passes globais.
-      const roundaboutsArr: SicroRoundaboutObject[] = [];
-      const othersWithoutRoundabouts: SicroObject[] = [];
-      for (const o of others) {
-        if (o.kind === "roundabout") roundaboutsArr.push(o);
-        else othersWithoutRoundabouts.push(o);
-      }
-      return {
-        roadObjects: roads,
-        nonRoadObjects: othersWithoutRoundabouts,
-        roundaboutObjects: roundaboutsArr,
-        intersectionPatches: patches,
-        clipZonesByRoad: zones,
-      };
-    }, [doc.objects]);
+  // Fase S clean cut — separa vias/rotatórias parity dos demais objetos
+  // (vehicle/line/marker/text/measurement) para que cada grupo seja
+  // renderizado pelo renderer apropriado. O `RoadParityRenderer` cuida
+  // de TODAS as vias e rotatórias parity.
+  const { parityObjects, otherObjects } = useMemo(() => {
+    const parity: SicroParityObject[] = [];
+    const others: SicroObject[] = [];
+    for (const o of doc.objects) {
+      if (isParityObject(o)) parity.push(o);
+      else others.push(o);
+    }
+    return { parityObjects: parity, otherObjects: others };
+  }, [doc.objects]);
 
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
@@ -347,8 +429,15 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
     const pointer = stage.getPointerPosition();
     if (!pointer) return;
     const direction = e.evt.deltaY > 0 ? -1 : 1;
-    const factor = direction > 0 ? 1.08 : 0.92;
-    const newScale = clamp(oldScale * factor, 0.1, 8);
+    const factor =
+      direction > 0
+        ? CROQUI_ZOOM_WHEEL_FACTOR_IN
+        : CROQUI_ZOOM_WHEEL_FACTOR_OUT;
+    const newScale = clamp(
+      oldScale * factor,
+      CROQUI_ZOOM_MIN,
+      CROQUI_ZOOM_MAX,
+    );
     const mousePointTo = {
       x: (pointer.x - editor.viewport.x) / oldScale,
       y: (pointer.y - editor.viewport.y) / oldScale,
@@ -374,7 +463,9 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
       onTap={handleStageClick}
       onDblClick={() => onCanvasDblClick?.()}
       onDblTap={() => onCanvasDblClick?.()}
+      onMouseDown={handleStageMouseDown}
       onMouseMove={handleStageMouseMove}
+      onMouseUp={handleStageMouseUp}
       onWheel={handleWheel}
       onDragEnd={(e) => {
         // Stage drag emits position changes — keep our state in sync so
@@ -387,7 +478,7 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
           y: stage.y(),
         });
       }}
-      style={{ background: "#f5f6f8" }}
+      style={{ background: "#a3a3a3" }}
     >
       <Layer listening={false}>
         <CanvasBackground doc={doc} />
@@ -406,99 +497,32 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
             asphalt. Intersection patches sit between the two passes so
             they cover the road markings at crossings but don't hide the
             objects above. */}
-        {doc.road_engine_version === "parity" ? (
-          // ─── Python Parity Engine (Fase H.3) ──────────────────────
-          // Pipeline simples paridade SICRO 1.0 Python.
-          // Consome `doc.parity_objects` (array dedicado, separado de
-          // `doc.objects` para preservar narrowing TypeScript do código
-          // legado v1/v2 — ver ROAD_ENGINE_PARITY_H1_REPORT.md).
-          <RoadParityRenderer
-            objects={
-              (doc.parity_objects ?? []).filter(
-                (o): o is SicroParityObject => isParityObject(o),
-              )
-            }
-            pxPerM={doc.scale?.px_per_m ?? null}
-            selectedId={editor.selectedId}
-            onSelect={(id) => onSelect(id ?? null)}
-            onObjectChange={
-              onParityObjectChange
-                ? (id, patch) => onParityObjectChange(id, patch)
-                : undefined
-            }
-          />
-        ) : doc.road_engine_version === "v2" ? (
-          // ─── Road Engine 2.0 v2 (Ciclo 2 fix) ──────────────────────
-          // RoadNetworkLayerV2 renderiza vias E rotatórias em passes
-          // globais (curbs → asfalto → junction patches → entry
-          // patches → bordas/marcações clipadas → handles). Substitui
-          // o approach Ciclo 2 anterior onde cada RoadMeshNode
-          // renderizava sozinho.
-          <RoadNetworkLayerV2
-            roads={roadObjects}
-            roundabouts={roundaboutObjects}
-            selectedId={editor.selectedId}
-            draggable={editor.tool === "select"}
-            onSelect={(id) => onSelect(id)}
-            onChange={(id, patch) => onObjectChange(id, patch)}
-            debugEnabled={editor.roadDebugV2}
-          />
-        ) : (
-          // ─── Road Engine v1 (legacy, fallback) ─────────────────────
-          <>
-            {roadObjects.map((obj) => (
-              <ObjectNode
-                key={obj.id}
-                obj={obj}
-                doc={doc}
-                tool={editor.tool}
-                selected={editor.selectedId === obj.id}
-                onSelect={() => onSelect(obj.id)}
-                onChange={(patch) => onObjectChange(obj.id, patch)}
-                clipZones={clipZonesByRoad[obj.id]}
-              />
-            ))}
-            {/* v1 junction patches: parallelogram fill cobrindo conflitos
-                de marcação. v2 substitui isso por patches no
-                RoadNetworkLayerV2. */}
-            {intersectionPatches.map((p) => {
-              const flat: number[] = [];
-              for (const pt of p.polygon) flat.push(pt.x, pt.y);
-              return (
-                <Line
-                  key={p.id}
-                  points={flat}
-                  closed
-                  fill={p.fill}
-                  strokeWidth={0}
-                  listening={false}
-                />
-              );
-            })}
-            {/* Rotatórias em v1 mode usam o RoundaboutMeshNode
-                individualmente (sem entry patches — não há rede). */}
-            {roundaboutObjects.map((obj) => (
-              <ObjectNode
-                key={obj.id}
-                obj={obj}
-                doc={doc}
-                tool={editor.tool}
-                selected={editor.selectedId === obj.id}
-                onSelect={() => onSelect(obj.id)}
-                onChange={(patch) => onObjectChange(obj.id, patch)}
-              />
-            ))}
-          </>
-        )}
-        {/* Não-vias e não-rotatórias (markers/vehicles/lines/text/
-            measurements) renderizam normalmente nos dois modos. */}
-        {nonRoadObjects.map((obj) => (
+        {/* Fase S — Python Parity Engine: único motor de vias e
+            rotatórias. Renderiza primeiro (camada de "asfalto") para
+            que demais objetos (veículos, vestígios, anotações)
+            empilhem visualmente por cima. */}
+        <RoadParityRenderer
+          objects={parityObjects}
+          pxPerM={doc.scale?.px_per_m ?? null}
+          selectedId={editor.selectedId}
+          onSelect={(id) => onSelect(id ?? null)}
+          onObjectChange={
+            onParityObjectChange
+              ? (id, patch) => onParityObjectChange(id, patch)
+              : undefined
+          }
+        />
+        {/* Demais objetos (vehicle / line / marker / text / measurement)
+            renderizam em cima das vias. */}
+        {otherObjects.map((obj) => (
           <ObjectNode
             key={obj.id}
             obj={obj}
             doc={doc}
             tool={editor.tool}
-            selected={editor.selectedId === obj.id}
+            // `selectedIds.includes` mostra destaque individual pra TODOS
+            // os itens marquee-selecionados, não só pro primeiro.
+            selected={editor.selectedIds.includes(obj.id)}
             onSelect={() => onSelect(obj.id)}
             onChange={(patch) => onObjectChange(obj.id, patch)}
           />
@@ -518,6 +542,34 @@ export const CanvasStage = forwardRef<CanvasStageHandle, Props>(function CanvasS
             return next;
           }}
         />
+        {/* Retângulo do marquee — só visível enquanto o usuário está
+            arrastando no modo `select`. Coords em world (stage), então
+            a stage já aplica viewport.scale/x/y automaticamente. */}
+        {editor.marquee && (() => {
+          const m = editor.marquee;
+          const r = rectFromPoints(
+            m.startWorldX,
+            m.startWorldY,
+            m.currentWorldX,
+            m.currentWorldY,
+          );
+          // Stroke fino dividido pelo scale pra ficar com aparência
+          // constante no zoom. Idem dash.
+          const invScale = 1 / Math.max(editor.viewport.scale, 0.0001);
+          return (
+            <Rect
+              x={r.x}
+              y={r.y}
+              width={r.width}
+              height={r.height}
+              fill="rgba(59, 130, 246, 0.12)"
+              stroke="#3b82f6"
+              strokeWidth={1 * invScale}
+              dash={[4 * invScale, 3 * invScale]}
+              listening={false}
+            />
+          );
+        })()}
       </Layer>
 
       <Layer listening={false}>
@@ -535,6 +587,14 @@ function CanvasBackground({ doc }: { doc: SicroCroquiDoc }) {
   const { width_px, height_px, background_color, grid } = doc.canvas;
   const gridSize = grid?.size_px ?? 50;
   const gridEnabled = grid?.enabled ?? true;
+
+  // Branco puro cansa a vista — substitui por off-white levemente
+  // tingido. Croquis com cor customizada (não-branca) são respeitados
+  // como vieram.
+  const effectiveBg =
+    background_color === "#ffffff" || background_color === "#FFFFFF"
+      ? "#f5f6f8"
+      : background_color;
 
   const lines = useMemo(() => {
     if (!gridEnabled) return [] as number[][];
@@ -555,12 +615,18 @@ function CanvasBackground({ doc }: { doc: SicroCroquiDoc }) {
         y={0}
         width={width_px}
         height={height_px}
-        fill={background_color}
-        stroke="#1f2937"
-        strokeWidth={1}
+        fill={effectiveBg}
+        stroke="#525252"
+        strokeWidth={2}
       />
       {lines.map((pts, i) => (
-        <Line key={i} points={pts} stroke="#e5e7eb" strokeWidth={1} listening={false} />
+        <Line
+          key={i}
+          points={pts}
+          stroke="#b8b8b8"
+          strokeWidth={1}
+          listening={false}
+        />
       ))}
     </>
   );
@@ -718,7 +784,6 @@ function ObjectNode({
   selected,
   onSelect,
   onChange,
-  clipZones,
 }: {
   obj: SicroObject;
   doc: SicroCroquiDoc;
@@ -726,8 +791,6 @@ function ObjectNode({
   selected: boolean;
   onSelect: () => void;
   onChange: (patch: Partial<SicroObject>) => void;
-  /** Junction clip zones — only meaningful for `kind === "road"` in v1. */
-  clipZones?: ClipCircle[];
 }) {
   // Only allow drag when the "select" tool is active.
   const draggable = tool === "select";
@@ -784,31 +847,13 @@ function ObjectNode({
           onChange={onChange}
         />
       );
-    case "roundabout":
-      return (
-        <RoundaboutMeshNode
-          obj={obj as SicroRoundaboutObject}
-          draggable={draggable}
-          selected={selected}
-          onSelect={onSelect}
-          onChange={onChange}
-        />
-      );
-    case "road":
-      // Road Engine v2 (`doc.road_engine_version === "v2"`) NÃO passa
-      // por aqui — o CanvasStage roteia vias v2 direto para o
-      // `RoadNetworkLayerV2` (render multipass global). Este case
-      // sempre renderiza com `RoadNode` (v1 legacy).
-      return (
-        <RoadNode
-          obj={obj}
-          draggable={draggable}
-          selected={selected}
-          onSelect={onSelect}
-          onChange={onChange}
-          clipZones={clipZones}
-        />
-      );
+    case "road_parity":
+    case "roundabout_parity":
+      // Fase S — vias e rotatórias parity NÃO passam pelo ObjectNode:
+      // são renderizadas em camada separada pelo `RoadParityRenderer`.
+      // Defensivo: se algum caller passar por aqui, não renderiza nada
+      // (o renderer parity já cuidou).
+      return null;
   }
 }
 
@@ -1236,433 +1281,6 @@ function LineNode({
     </Group>
   );
 }
-
-// ===========================================================================
-// Road Engine Pro — RoadNode (MVP 9, second pass).
-//
-// Renders a `SicroRoadObject` as a stack of Konva primitives:
-//
-//   1. Curb (optional)          — widest, drawn first as a halo around
-//                                  the paved surface.
-//   2. Asphalt body              — the paved surface itself (Konva.Line
-//                                  stroke with `tension` for smoothing).
-//   3. Lane dividers (optional)  — interior dashed lines (only when
-//                                  `lane_count > 2` and `lane_dividers`
-//                                  is set).
-//   4. Edge lines (optional)     — two offset polylines hugging the
-//                                  pavement edges.
-//   5. Center line (optional)    — solid / dashed / double / solid-dashed
-//                                  combinations following the markings.
-//   6. Crosswalks (optional)     — zebra stripes at start / end.
-//   7. Selection cue             — dashed light-blue overlay shown only
-//                                  when the road is selected.
-//
-// Konva.Line's `tension` prop produces the smooth curve. We do NOT
-// pre-sample with Catmull-Rom on render — the renderer just hands the
-// raw control polyline to Konva and lets it interpolate. Edge / center
-// / lane-divider polylines reuse the same control polyline so they
-// curve in lockstep with the body.
-
-function RoadNode({
-  obj,
-  draggable,
-  selected,
-  onSelect,
-  onChange,
-  clipZones,
-}: {
-  obj: SicroRoadObject;
-  draggable: boolean;
-  selected: boolean;
-  onSelect: () => void;
-  onChange: (patch: Partial<SicroObject>) => void;
-  /** Junction zones — each marking polyline is clipped to OUTSIDE these. */
-  clipZones?: ClipCircle[];
-}) {
-  const halfWidth = obj.width / 2;
-  const tension = obj.spline_tension;
-  const showEdges = obj.markings.edge_line;
-  const centerStyle = obj.markings.center_line;
-  // Closed loops never get a centre marking — a yellow stripe across
-  // a rotatória reads as wrong even when OSM happens to leave the
-  // tag in. We belt-and-braces this here so future RoadStyle presets
-  // can't accidentally surface it.
-  const showCenter =
-    centerStyle !== "none" && obj.closed_path !== true;
-  const showLaneDividers =
-    obj.markings.lane_dividers && obj.lane_count > 1;
-
-  // Round 4 — seamless intersections.
-  //
-  // Each "marking polyline" (edge, center, lane divider) is now split
-  // into sub-polylines that AVOID every junction this road participates
-  // in. The intersection patch on top of the asphalt is opaque, but
-  // physically skipping the markings is what makes the result truly
-  // seamless — there's literally no line to leak if the patch alpha
-  // changes or the fill colours differ between crossing roads.
-  const zones = clipZones ?? EMPTY_CLIP_ZONES;
-  const clipMarkings = useCallback(
-    (poly: number[]): number[][] =>
-      clipPolylineAgainstCircles(poly, zones),
-    [zones],
-  );
-
-  const leftEdgeSegments = useMemo(() => {
-    const off = offsetPolyline(obj.points, -(halfWidth - 4));
-    return clipMarkings(off);
-  }, [obj.points, halfWidth, clipMarkings]);
-  const rightEdgeSegments = useMemo(() => {
-    const off = offsetPolyline(obj.points, halfWidth - 4);
-    return clipMarkings(off);
-  }, [obj.points, halfWidth, clipMarkings]);
-
-  // Center line — single, double-solid or solid+dashed variants — also
-  // produce one or more parallel polylines that get clipped.
-  const centerSegmentsSingle = useMemo(
-    () => clipMarkings(obj.points),
-    [obj.points, clipMarkings],
-  );
-  const centerSegmentsDoubleLeft = useMemo(
-    () => clipMarkings(offsetPolyline(obj.points, -3)),
-    [obj.points, clipMarkings],
-  );
-  const centerSegmentsDoubleRight = useMemo(
-    () => clipMarkings(offsetPolyline(obj.points, 3)),
-    [obj.points, clipMarkings],
-  );
-
-  const laneDividerSegments = useMemo(() => {
-    if (!showLaneDividers) return [] as number[][];
-    const out: number[][] = [];
-    const lane = obj.lane_width ?? obj.width / obj.lane_count;
-    for (let i = 1; i < obj.lane_count; i++) {
-      const offset = -halfWidth + i * lane;
-      // Skip the boundary that overlaps the center line (within 1 px).
-      if (Math.abs(offset) < 1) continue;
-      const off = offsetPolyline(obj.points, offset);
-      for (const sub of clipMarkings(off)) out.push(sub);
-    }
-    return out;
-  }, [
-    obj.points,
-    obj.lane_count,
-    obj.lane_width,
-    obj.width,
-    halfWidth,
-    showLaneDividers,
-    clipMarkings,
-  ]);
-
-  // Edge / centre colours.
-  //
-  // MVP 10 Round 5 — the perito can now override the marking colour
-  // per road via `markings.color`. `"auto"` (default) keeps the
-  // legacy heuristic (yellow on highway/avenue, white elsewhere);
-  // `"white"` / `"yellow"` force the explicit choice for both the
-  // centre line and the lane dividers. Edge lines stay white in all
-  // cases (Brazilian convention).
-  const markingColor = obj.markings.color ?? "auto";
-  const edgeColor = "#f5f5f5";
-  const centerColor =
-    markingColor === "yellow"
-      ? "#fde047"
-      : markingColor === "white"
-        ? "#f5f5f5"
-        : obj.road_style === "highway" || obj.road_style === "avenue"
-          ? "#fde047"
-          : "#f5f5f5";
-  // MVP 10 Round 5 — closed-loop flag. Konva.Line gets `closed`
-  // when set, which:
-  //   - skips end caps (so rotatórias don't grow weird bulbs at the
-  //     join);
-  //   - tells Konva to draw the closing segment using the same
-  //     `tension` and `lineJoin`, producing a clean ring;
-  //   - we also suppress the centre line when closed (a roundabout
-  //     with a yellow stripe across it is wrong by construction;
-  //     OSM `junction=roundabout` already forces `markings.center_line
-  //     = "none"` but other closed loops might still try — we drop
-  //     the centre marking unconditionally for closed paths).
-  const isClosed = obj.closed_path === true;
-
-  const crosswalkStripes = useMemo(() => {
-    const out: number[][] = [];
-    if (obj.markings.crosswalk_start) {
-      out.push(...buildCrosswalkStripes(obj, "start"));
-    }
-    if (obj.markings.crosswalk_end) {
-      out.push(...buildCrosswalkStripes(obj, "end"));
-    }
-    return out;
-  }, [obj]);
-
-  if (obj.visible === false) return null;
-  if (obj.points.length < 4) {
-    // Degenerate road (single control point) — nothing useful to render.
-    return null;
-  }
-
-  return (
-    <Group
-      id={obj.id}
-      draggable={draggable && !obj.locked}
-      onClick={onSelect}
-      onTap={onSelect}
-      onDragEnd={(e) => {
-        // Translate the entire road by the drag offset, mirroring LineNode.
-        const dx = e.target.x();
-        const dy = e.target.y();
-        const next = obj.points.map((v, i) =>
-          v + (i % 2 === 0 ? dx : dy),
-        );
-        e.target.position({ x: 0, y: 0 });
-        onChange({ points: next } as Partial<SicroObject>);
-      }}
-    >
-      {obj.curb.enabled && (
-        <Line
-          points={obj.points}
-          stroke={obj.curb.color}
-          strokeWidth={obj.width + obj.curb.width * 2}
-          tension={tension}
-          // Round caps make sense on open polylines but produce
-          // visible "bulbs" at the start/end of a closed ring. Use
-          // butt caps when closed — the lineJoin handles the seam.
-          lineCap={isClosed ? "butt" : "round"}
-          lineJoin="round"
-          closed={isClosed}
-          listening={false}
-        />
-      )}
-      <Line
-        points={obj.points}
-        stroke={obj.surface.fill}
-        strokeWidth={obj.width}
-        tension={tension}
-        lineCap={isClosed ? "butt" : "round"}
-        lineJoin="round"
-        closed={isClosed}
-        hitStrokeWidth={Math.max(obj.width + 8, 20)}
-      />
-      {laneDividerSegments.map((pts, i) => (
-        <Line
-          key={`lane_${i}`}
-          points={pts}
-          stroke={edgeColor}
-          strokeWidth={2}
-          // Sub-segments are straight chords (clipping interpolates
-          // linearly), so we don't want Konva's `tension` to bend them
-          // — that would visibly diverge from the curved asphalt body
-          // near the clip boundaries.
-          dash={[14, 12]}
-          opacity={0.8}
-          listening={false}
-        />
-      ))}
-      {showEdges &&
-        leftEdgeSegments.map((pts, i) => (
-          <Line
-            key={`leftedge_${i}`}
-            points={pts}
-            stroke={edgeColor}
-            strokeWidth={2}
-            opacity={0.9}
-            listening={false}
-          />
-        ))}
-      {showEdges &&
-        rightEdgeSegments.map((pts, i) => (
-          <Line
-            key={`rightedge_${i}`}
-            points={pts}
-            stroke={edgeColor}
-            strokeWidth={2}
-            opacity={0.9}
-            listening={false}
-          />
-        ))}
-      {showCenter &&
-        centerStyle === "solid" &&
-        centerSegmentsSingle.map((pts, i) => (
-          <Line
-            key={`center_solid_${i}`}
-            points={pts}
-            stroke={centerColor}
-            strokeWidth={2}
-            opacity={0.95}
-            listening={false}
-          />
-        ))}
-      {showCenter &&
-        centerStyle === "dashed" &&
-        centerSegmentsSingle.map((pts, i) => (
-          <Line
-            key={`center_dashed_${i}`}
-            points={pts}
-            stroke={centerColor}
-            strokeWidth={2}
-            dash={[16, 12]}
-            opacity={0.95}
-            listening={false}
-          />
-        ))}
-      {showCenter &&
-        centerStyle === "double_solid" && (
-          <>
-            {centerSegmentsDoubleLeft.map((pts, i) => (
-              <Line
-                key={`center_dl_${i}`}
-                points={pts}
-                stroke={centerColor}
-                strokeWidth={2}
-                opacity={0.95}
-                listening={false}
-              />
-            ))}
-            {centerSegmentsDoubleRight.map((pts, i) => (
-              <Line
-                key={`center_dr_${i}`}
-                points={pts}
-                stroke={centerColor}
-                strokeWidth={2}
-                opacity={0.95}
-                listening={false}
-              />
-            ))}
-          </>
-        )}
-      {showCenter &&
-        centerStyle === "solid_dashed" && (
-          <>
-            {centerSegmentsDoubleLeft.map((pts, i) => (
-              <Line
-                key={`center_sdL_${i}`}
-                points={pts}
-                stroke={centerColor}
-                strokeWidth={2}
-                opacity={0.95}
-                listening={false}
-              />
-            ))}
-            {centerSegmentsDoubleRight.map((pts, i) => (
-              <Line
-                key={`center_sdR_${i}`}
-                points={pts}
-                stroke={centerColor}
-                strokeWidth={2}
-                dash={[16, 12]}
-                opacity={0.95}
-                listening={false}
-              />
-            ))}
-          </>
-        )}
-      {crosswalkStripes.map((pts, i) => (
-        <Line
-          key={`cw_${i}`}
-          points={pts}
-          stroke="#ffffff"
-          strokeWidth={4}
-          lineCap="butt"
-          listening={false}
-        />
-      ))}
-      {selected && (
-        <Line
-          points={obj.points}
-          stroke="#0ea5e9"
-          strokeWidth={2}
-          tension={tension}
-          dash={[6, 4]}
-          opacity={0.85}
-          listening={false}
-        />
-      )}
-      {selected &&
-        pairsOf(obj.points).map((p, i) => (
-          <Circle
-            key={`cp_${i}`}
-            x={p.x}
-            y={p.y}
-            radius={7}
-            fill="#ffffff"
-            stroke="#0ea5e9"
-            strokeWidth={2}
-            // The control-point handles are draggable when the parent
-            // road isn't locked and the user is in select mode. We commit
-            // on `onDragEnd` only (not onDragMove) so each repositioning
-            // produces exactly one undo entry.
-            draggable={draggable && !obj.locked}
-            onMouseEnter={(e) => {
-              const stage = e.target.getStage();
-              if (stage) stage.container().style.cursor = "grab";
-            }}
-            onMouseLeave={(e) => {
-              const stage = e.target.getStage();
-              if (stage) stage.container().style.cursor = "default";
-            }}
-            onClick={(e) => {
-              // Ctrl/Cmd+click removes this control point (if the road
-              // would still have >= 2 points afterwards). Stops event
-              // propagation so the parent Group doesn't also fire.
-              e.cancelBubble = true;
-              if (
-                (e.evt.ctrlKey || e.evt.metaKey) &&
-                obj.points.length > 4
-              ) {
-                const next = obj.points.slice();
-                next.splice(i * 2, 2);
-                onChange({ points: next } as Partial<SicroObject>);
-              }
-            }}
-            onDragStart={(e) => {
-              e.cancelBubble = true;
-            }}
-            onDragEnd={(e) => {
-              e.cancelBubble = true;
-              const next = obj.points.slice();
-              next[i * 2] = e.target.x();
-              next[i * 2 + 1] = e.target.y();
-              onChange({ points: next } as Partial<SicroObject>);
-            }}
-          />
-        ))}
-    </Group>
-  );
-}
-
-/**
- * Build a list of crosswalk stripes (flat-array polylines) at one
- * endpoint of a road. Each stripe runs across the road, perpendicular
- * to the centerline tangent; consecutive stripes are spaced along the
- * road into the body.
- */
-function buildCrosswalkStripes(
-  road: SicroRoadObject,
-  end: "start" | "end",
-): number[][] {
-  const basis = endcapBasis(road.points, end);
-  if (!basis) return [];
-  const { center, along, across } = basis;
-  const halfW = road.width / 2;
-  // 4 stripes, 7 px pitch — fits comfortably inside a ~32 px deep zone.
-  const stripePitch = 7;
-  const stripeCount = 4;
-  // `along` at the start points INTO the body; at the end it points OUT.
-  const intoBody = end === "start" ? 1 : -1;
-  const out: number[][] = [];
-  for (let i = 0; i < stripeCount; i++) {
-    const t = (i + 0.5) * stripePitch * intoBody;
-    const cx = center.x + along.x * t;
-    const cy = center.y + along.y * t;
-    const sx = cx + across.x * -halfW;
-    const sy = cy + across.y * -halfW;
-    const ex = cx + across.x * halfW;
-    const ey = cy + across.y * halfW;
-    out.push([sx, sy, ex, ey]);
-  }
-  return out;
-}
-
 function ArrowHead({
   x1,
   y1,

@@ -9,10 +9,24 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import styles from "./Ruler.module.css";
 
 export const PX_PER_CM = 96 / 2.54;
 export const RULER_THICKNESS = 22;
+
+/**
+ * Passo de snap padrão das réguas. Bate com a densidade visual de ticks
+ * (subdivisões a cada 0.25 cm). Quando o usuário arrasta com SÓ o botão
+ * esquerdo, o valor é arredondado pra esse incremento. Segurando o botão
+ * DIREITO em paralelo, o snap é desligado e o handle anda livre.
+ */
+export const SNAP_STEP_CM = 0.25;
+
+/** Snap arredondando pra múltiplo mais próximo de `step`. */
+export function snapCmIf(cm: number, snap: boolean, step = SNAP_STEP_CM): number {
+  return snap ? Math.round(cm / step) * step : cm;
+}
 
 interface HorizontalRulerProps {
   widthCm: number;
@@ -39,31 +53,48 @@ export function HorizontalRuler({
   const widthPx = widthCm * PX_PER_CM;
   const svgRef = useRef<SVGSVGElement>(null);
 
-  // Overlay visual durante o drag — não persistimos a cada pixel para
-  // evitar disparar saves o tempo todo; só persistimos no mouseup.
-  const [dragPreview, setDragPreview] = useState<{
+  // Overlay visual (linha tracejada VERTICAL) durante o drag das margens
+  // esquerda/direita. Mesma estratégia do indent: o triângulo fica parado
+  // no lugar durante o drag, e uma linha tracejada via portal segue a
+  // posição projetada onde a margem vai cair. Some no mouseup.
+  // Cor amber (#fbbf24) pra combinar com a cor do MarginHandle.
+  const [marginOverlay, setMarginOverlay] = useState<{
     side: "left" | "right";
-    cm: number;
+    screenX: number;
+    topPx: number;
   } | null>(null);
   // R — Drag state separado pro handle do recuo da primeira linha.
   const [indentDragPreview, setIndentDragPreview] = useState<number | null>(
     null,
   );
+  // Overlay visual (linha tracejada vertical) durante o drag do recuo.
+  // O triângulo do handle por design fica parado no lugar até o
+  // mouseup (anti-flicker via useEffect M7). Pra dar feedback de
+  // "onde vai cair", desenhamos uma linha tracejada ao longo da página
+  // que segue a posição projetada do indent. Coordenadas em screen-px
+  // pra que `position: fixed` funcione corretamente sob CSS transform
+  // (zoom da página). Renderizada via portal pra não ser cortada pelo
+  // SVG da régua.
+  const [indentOverlay, setIndentOverlay] = useState<{
+    screenX: number;
+    topPx: number;
+  } | null>(null);
 
+  // Estilo Word: subdivisões a cada 0.25 cm com 3 tamanhos
+  //   - tick maior (12px)   → todo número inteiro (1, 2, 3, …)  e leva label
+  //   - tick médio (7px)    → metades (.5)
+  //   - tick pequeno (3px)  → quartos (.25 e .75)
   const ticks: number[] = [];
-  for (let half = 0; half <= widthCm * 2; half++) {
-    ticks.push(half / 2);
+  for (let q = 0; q <= widthCm * 4; q++) {
+    ticks.push(q / 4);
   }
 
-  // Posições (em px) — usam preview se houver drag ativo.
-  const leftPx =
-    dragPreview?.side === "left"
-      ? dragPreview.cm * PX_PER_CM
-      : leftMarginCm * PX_PER_CM;
-  const rightPxFromRight =
-    dragPreview?.side === "right"
-      ? dragPreview.cm * PX_PER_CM
-      : rightMarginCm * PX_PER_CM;
+  // Posições (em px) — sempre usam as props. O handle fica parado durante
+  // o drag (o feedback visual vem pela linha tracejada do `marginOverlay`).
+  // Após o mouseup, a prop atualiza via store e o handle "salta" pra
+  // posição final — mesmo padrão do handle do recuo (indent).
+  const leftPx = leftMarginCm * PX_PER_CM;
+  const rightPxFromRight = rightMarginCm * PX_PER_CM;
   const rightMarginPx = widthPx - rightPxFromRight;
   const usableWidthPx = Math.max(0, rightMarginPx - leftPx);
 
@@ -94,6 +125,14 @@ export function HorizontalRuler({
     const cursorCm = (cursorX: number): number =>
       ((cursorX - rect.left) / widthVisualPx) * widthCm;
 
+    // cm (na convenção lateral correspondente: distância da borda esquerda
+    // pra "left", ou da borda direita pra "right") → screen X. Usa as
+    // dimensões visuais do svgRect, então respeita CSS transform (zoom).
+    const marginToScreenX = (cm: number, s: "left" | "right"): number => {
+      const absCmFromLeft = s === "left" ? cm : widthCm - cm;
+      return rect.left + (absCmFromLeft / widthCm) * rect.width;
+    };
+
     const cursorCmAtStart = cursorCm(e.clientX);
     const handleCmAtStart =
       side === "left" ? leftMarginCm : widthCm - rightMarginCm;
@@ -110,49 +149,69 @@ export function HorizontalRuler({
       }
     };
 
-    // F11.4 — Não fazer setDragPreview no mousedown — só no mousemove.
-    // Isso evita o handle "pular" instantaneamente para a posição do
-    // cursor mesmo quando o user só clicou sem arrastar.
+    // Linha tracejada já visível no mousedown (na posição atual do handle).
+    const currentCm = side === "left" ? leftMarginCm : rightMarginCm;
+    setMarginOverlay({
+      side,
+      screenX: marginToScreenX(currentCm, side),
+      topPx: rect.bottom,
+    });
+
+    // Snap: ativo por padrão. Desliga quando o botão DIREITO está
+    // simultaneamente pressionado (mousedown left + right = drag livre).
+    // `lastButtons` guarda o bitmask de botões da última posição do mouse
+    // pra usar consistentemente entre onMove e onUp.
     let didMove = false;
+    let lastButtons = e.buttons;
 
     const onMove = (ev: MouseEvent) => {
       didMove = true;
-      setDragPreview({ side, cm: compute(ev.clientX) });
+      lastButtons = ev.buttons;
+      const raw = compute(ev.clientX);
+      // bit 2 = botão direito pressionado → snap OFF
+      const next = snapCmIf(raw, (lastButtons & 2) === 0);
+      // Atualiza a linha tracejada pra refletir onde a margem vai cair.
+      setMarginOverlay({
+        side,
+        screenX: marginToScreenX(next, side),
+        topPx: rect.bottom,
+      });
     };
     const onUp = (ev: MouseEvent) => {
+      // Só responde ao release do botão ESQUERDO (button=0). Release do
+      // direito enquanto o esquerdo segue pressionado não encerra o drag —
+      // só altera o estado de snap.
+      if (ev.button !== 0) return;
       // Só commita se o user realmente moveu o mouse (não foi click puro).
       if (didMove) {
-        const final = compute(ev.clientX);
+        const raw = compute(ev.clientX);
+        const final = snapCmIf(raw, (lastButtons & 2) === 0);
         if (side === "left") onLeftMarginChange?.(final);
         else onRightMarginChange?.(final);
-        // M7 — NÃO limpa o dragPreview aqui. O commit acima dispara
-        // uma atualização do store que eventualmente atualiza a prop
-        // `leftMarginCm`/`rightMarginCm`. Entre o commit e a chegada
-        // da prop nova, há um frame onde a prop ainda está com o valor
-        // ANTIGO — se limpássemos dragPreview agora, o handle pintaria
-        // no valor antigo nesse frame (jump visual). Em vez disso, o
-        // useEffect abaixo limpa o preview quando a prop alinha.
-        setDragPreview({ side, cm: final });
-      } else {
-        // Click puro (sem drag): limpa imediatamente.
-        setDragPreview(null);
       }
+      // A linha tracejada some sempre no release — mesmo padrão do indent.
+      setMarginOverlay(null);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("contextmenu", onContextMenu);
     };
+    // Suprime o context-menu do sistema durante o drag pra que o botão
+    // direito sirva só como modificador "snap off".
+    const onContextMenu = (ev: MouseEvent) => ev.preventDefault();
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("contextmenu", onContextMenu);
   };
 
   // Cursor + cleanup
   useEffect(() => {
-    if (!dragPreview && indentDragPreview === null) return;
+    if (!marginOverlay && indentDragPreview === null) return;
     const prev = document.body.style.cursor;
     document.body.style.cursor = "ew-resize";
     return () => {
       document.body.style.cursor = prev;
     };
-  }, [dragPreview, indentDragPreview]);
+  }, [marginOverlay, indentDragPreview]);
 
   // R — Sincroniza indentDragPreview com a prop (igual margens M7).
   useEffect(() => {
@@ -167,50 +226,108 @@ export function HorizontalRuler({
   // R — Drag handler do recuo da primeira linha. Diferente das margens:
   // a posição é relativa à margem esquerda (não absoluta na régua), e
   // permite valores negativos (recuo deslocado pra esquerda, "hanging").
+  //
+  // Aplica o mesmo padrão dos margin handles (M5+M7+F11.4):
+  //   - Trabalha em CM, não em px (evita mistura visual/internal em zoom != 1)
+  //   - Captura o offset entre cursor e handle no mousedown (preserva grab point)
+  //   - didMove flag — clique sem arrastar não altera o valor
+  //   - Commita SÓ no mouseup (não a cada mousemove)
+  //   - Não seta dragPreview no mousedown
+  //   - Mantém preview até prop alinhar (anti-flicker, useEffect cuida disso)
   const startIndentDrag = (e: React.MouseEvent<SVGElement>) => {
     if (!onFirstLineIndentChange) return;
     e.preventDefault();
     e.stopPropagation();
+
     const svg = svgRef.current;
     if (!svg) return;
-    const svgRect = svg.getBoundingClientRect();
-    const onMove = (ev: MouseEvent) => {
-      const xPx = ev.clientX - svgRect.left;
-      // Indent relativo à margem esquerda. Permite -2cm a +8cm de range.
-      const indentPx = xPx - leftPx;
-      const cm = clamp(indentPx / PX_PER_CM, -2, 8);
-      setIndentDragPreview(cm);
-      onFirstLineIndentChange(cm);
+    const rect = svg.getBoundingClientRect();
+    const widthVisualPx = rect.width;
+    if (widthVisualPx <= 0) return;
+
+    // Cursor em cm (consistente com leftMarginCm/firstLineIndentCm) —
+    // converte clientX bruto pra cm na escala da página, independente de zoom.
+    const cursorCm = (cursorX: number): number =>
+      ((cursorX - rect.left) / widthVisualPx) * widthCm;
+
+    // indent (cm) → screen X (px absolutos) — usa as mesmas dimensões
+    // visuais do svgRect, então funciona corretamente sob CSS transform
+    // (zoom da página).
+    const indentToScreenX = (indentCm: number): number =>
+      rect.left + ((leftMarginCm + indentCm) / widthCm) * rect.width;
+
+    // Posição absoluta do handle na régua em cm = margem esquerda + indent atual.
+    const cursorCmAtStart = cursorCm(e.clientX);
+    const handleAbsCmAtStart = leftMarginCm + firstLineIndentCm;
+    const offsetCm = cursorCmAtStart - handleAbsCmAtStart;
+
+    const compute = (clientX: number): number => {
+      const newHandleAbsCm = cursorCm(clientX) - offsetCm;
+      // Convert back to indent (relativo à margem esquerda). Permite hanging
+      // até -2cm e recuo até +8cm — mesma faixa do código original.
+      return clamp(newHandleAbsCm - leftMarginCm, -2, 8);
     };
-    const onUp = () => {
+
+    // Linha tracejada já visível no primeiro clique, na posição atual
+    // do handle (ainda não moveu, mas já dá feedback de "drag iniciado").
+    setIndentOverlay({
+      screenX: indentToScreenX(firstLineIndentCm),
+      topPx: rect.bottom,
+    });
+
+    // Snap: ON por padrão (left-only), OFF se right button também
+    // pressionado. Mesmo padrão das margens.
+    let didMove = false;
+    let lastButtons = e.buttons;
+
+    const onMove = (ev: MouseEvent) => {
+      didMove = true;
+      lastButtons = ev.buttons;
+      const raw = compute(ev.clientX);
+      const next = snapCmIf(raw, (lastButtons & 2) === 0);
+      setIndentDragPreview(next);
+      // Atualiza a linha tracejada pra refletir onde o indent vai cair
+      // (já considerando clamping da faixa [-2, 8] cm).
+      setIndentOverlay({
+        screenX: indentToScreenX(next),
+        topPx: rect.bottom,
+      });
+    };
+    const onUp = (ev: MouseEvent) => {
+      if (ev.button !== 0) return;
+      if (didMove) {
+        const raw = compute(ev.clientX);
+        const final = snapCmIf(raw, (lastButtons & 2) === 0);
+        onFirstLineIndentChange(final);
+        // M7 — segura o preview no valor final até a prop chegar do store.
+        // O useEffect abaixo limpa quando prop e preview convergirem.
+        setIndentDragPreview(final);
+      } else {
+        // Clique puro: nenhuma mudança, limpa imediato.
+        setIndentDragPreview(null);
+      }
+      // A linha tracejada some sempre no release — feature pedida.
+      setIndentOverlay(null);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
-      setIndentDragPreview((curr) => curr); // segura até prop alinhar (M7)
+      window.removeEventListener("contextmenu", onContextMenu);
     };
+    const onContextMenu = (ev: MouseEvent) => ev.preventDefault();
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("contextmenu", onContextMenu);
   };
 
-  // M7 — Sincroniza dragPreview com a prop depois do commit. Se a prop
-  // recebida bater (dentro de uma tolerância pequena) com o valor do
-  // preview, limpa o preview — então a renderização passa a usar a prop
-  // sem flicker. Se a prop divergir (ex: hardcap fez recuar), atualiza
-  // o preview pra prop primeiro, e o próximo tick limpa.
-  useEffect(() => {
-    if (!dragPreview) return;
-    const propValue =
-      dragPreview.side === "left" ? leftMarginCm : rightMarginCm;
-    if (Math.abs(propValue - dragPreview.cm) < 0.005) {
-      setDragPreview(null);
-    } else {
-      setDragPreview({ side: dragPreview.side, cm: propValue });
-    }
-  }, [leftMarginCm, rightMarginCm, dragPreview]);
+  // Nota: o antigo useEffect M7 (que sincronizava `dragPreview` com a
+  // prop pós-commit pra evitar flicker) foi removido — não há mais
+  // `dragPreview` afetando a posição do handle. O handle sempre lê
+  // direto da prop, então flicker é impossível.
 
   const draggableLeft = !!onLeftMarginChange;
   const draggableRight = !!onRightMarginChange;
 
   return (
+    <>
     <svg
       ref={svgRef}
       role="presentation"
@@ -235,9 +352,10 @@ export function HorizontalRuler({
       />
       {ticks.map((t) => {
         const x = t * PX_PER_CM;
-        const isMajor = Number.isInteger(t) && t > 0 && t % 5 === 0;
         const isInt = Number.isInteger(t);
-        const tickH = isMajor ? 12 : isInt ? 8 : 4;
+        const isHalf = !isInt && (t * 2) % 1 === 0;
+        // 12 / 7 / 3 px — matches Word's ruler density
+        const tickH = isInt ? 12 : isHalf ? 7 : 3;
         return (
           <line
             key={t}
@@ -249,7 +367,7 @@ export function HorizontalRuler({
           />
         );
       })}
-      {[5, 10, 15, 20].filter((n) => n <= widthCm).map((n) => (
+      {Array.from({ length: Math.floor(widthCm) }, (_, i) => i + 1).map((n) => (
         <text
           key={n}
           x={n * PX_PER_CM}
@@ -264,7 +382,7 @@ export function HorizontalRuler({
       <MarginHandle
         x={leftPx}
         draggable={draggableLeft}
-        active={dragPreview?.side === "left"}
+        active={marginOverlay?.side === "left"}
         onMouseDown={(e) => startDrag(e, "left")}
         tooltip={
           draggableLeft
@@ -276,7 +394,7 @@ export function HorizontalRuler({
       <MarginHandle
         x={rightMarginPx}
         draggable={draggableRight}
-        active={dragPreview?.side === "right"}
+        active={marginOverlay?.side === "right"}
         onMouseDown={(e) => startDrag(e, "right")}
         tooltip={
           draggableRight
@@ -299,25 +417,53 @@ export function HorizontalRuler({
           />
         );
       })()}
-      {/* Preview line while dragging */}
-      {dragPreview && (
-        <line
-          x1={
-            dragPreview.side === "left"
-              ? leftPx
-              : rightMarginPx
-          }
-          x2={
-            dragPreview.side === "left"
-              ? leftPx
-              : rightMarginPx
-          }
-          y1={0}
-          y2={RULER_THICKNESS}
-          className={styles.dragLine}
-        />
-      )}
     </svg>
+    {/* Linha tracejada VERTICAL durante drag de margem esquerda/direita.
+     *  Cor amber (#fbbf24) pra combinar com o MarginHandle. Mesma técnica
+     *  do indent: portal em `document.body` com `position: fixed`, some
+     *  no mouseup. */}
+    {marginOverlay !== null &&
+      createPortal(
+        <div
+          aria-hidden
+          style={{
+            position: "fixed",
+            left: `${marginOverlay.screenX}px`,
+            top: `${marginOverlay.topPx}px`,
+            bottom: 0,
+            width: 0,
+            borderLeft: "1px dashed #fbbf24",
+            pointerEvents: "none",
+            zIndex: 9999,
+          }}
+        />,
+        document.body,
+      )}
+    {/* R — Linha tracejada vertical durante drag do recuo da primeira
+     *  linha. O triângulo do handle, por design, fica parado até o
+     *  release (anti-flicker via M7), então essa linha é o feedback
+     *  visual de "onde vai cair". Renderizada via portal em
+     *  `document.body` com `position: fixed` pra não ser cortada pelo
+     *  SVG da régua e pra ignorar transforms (zoom) do container do
+     *  editor. Some no mouseup. */}
+    {indentOverlay !== null &&
+      createPortal(
+        <div
+          aria-hidden
+          style={{
+            position: "fixed",
+            left: `${indentOverlay.screenX}px`,
+            top: `${indentOverlay.topPx}px`,
+            bottom: 0,
+            width: 0,
+            borderLeft: "1px dashed #1f6feb",
+            pointerEvents: "none",
+            zIndex: 9999,
+          }}
+        />,
+        document.body,
+      )}
+    </>
   );
 }
 

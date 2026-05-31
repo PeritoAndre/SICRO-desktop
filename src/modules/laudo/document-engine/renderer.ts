@@ -153,7 +153,11 @@ const BASE_DOC_STYLES = `
     position: running(sicroHeader);
     width: 100%;
     height: var(--sicro-header-height, 2.5cm);
-    overflow: hidden;
+    /* Pós-laudo U — overflow visível pra TextBoxes/Figures dentro do
+     * cabeçalho poderem extender pra fora da altura nominal (caso típico:
+     * texto vertical lateral + logo no canto da página, ambos parte do
+     * cabeçalho replicado). Mesmo do editor (.region overflow:visible). */
+    overflow: visible;
     border-bottom: 0.5pt solid #999;
     padding: 0.1cm 0 0.15cm;
     font-family: "Times New Roman", Cambria, serif;

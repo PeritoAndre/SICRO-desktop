@@ -1,20 +1,39 @@
 /**
- * NewLaudoDialog — pede título + template ao criar um laudo novo.
+ * NewLaudoDialog — pede título do laudo (e número opcional) ao criar.
  *
- * Substitui o atalho "createLaudo direto com documento_livre" que existia
- * antes do MVP 2. Ao confirmar, gera o conteúdo inicial via
- * `findTemplate(id).build(title, occurrence)` e passa ao store, que persiste
- * imediatamente.
+ * Hoje só há um template ("Documento em branco" + cabeçalho oficial
+ * automático), então o seletor de templates só aparece quando há
+ * mais de um cadastrado em `TEMPLATES`. Para o caso comum, o usuário
+ * só preenche título e clica criar.
+ *
+ * Cabeçalho oficial:
+ *   - `layout.institutional_template = "pca_padrao_v1"` é gravado
+ *     junto com o doc inicial.
+ *   - `header.enabled = true` e `header.content` é semeado a partir
+ *     do template institucional (brand lines, subtitle, metadata
+ *     em uma linha só).
+ *   Isso garante que ao abrir o laudo, o usuário JÁ VÊ o cabeçalho
+ *   oficial sem precisar configurar nada manualmente.
  */
 
 import { useState, type FormEvent } from "react";
+import type { JSONContent } from "@tiptap/core";
 import { Dialog } from "@components/Dialog/Dialog";
 import { Button } from "@components/Button/Button";
 import { useLaudoStore } from "../store/laudoStore";
-import { TEMPLATES, findTemplate, type OccurrenceContext } from "../document-engine";
+import {
+  TEMPLATES,
+  findTemplate,
+  PCA_PADRAO_V1,
+  seedHeaderContentFromInstitutionalTemplate,
+  type OccurrenceContext,
+  type SicroDocHeader,
+} from "../document-engine";
 import { toSicroError } from "@core/errors";
 import type { Laudo } from "@domain/laudo";
 import styles from "./NewLaudoDialog.module.css";
+
+const DEFAULT_TEMPLATE_ID = "documento_em_branco";
 
 interface NewLaudoDialogProps {
   open: boolean;
@@ -37,14 +56,18 @@ export function NewLaudoDialog({
   const isMutating = useLaudoStore((s) => s.isMutating);
 
   const [title, setTitle] = useState(suggestedTitle);
-  const [templateId, setTemplateId] = useState<string>("documento_livre");
+  const [templateId, setTemplateId] = useState<string>(DEFAULT_TEMPLATE_ID);
   const [numeroLaudo, setNumeroLaudo] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  // Quando só há um template registrado, o seletor visual fica
+  // escondido — não faz sentido pedir escolha entre uma opção só.
+  const showTemplatePicker = TEMPLATES.length > 1;
 
   const close = () => {
     setError(null);
     setTitle(suggestedTitle);
-    setTemplateId("documento_livre");
+    setTemplateId(DEFAULT_TEMPLATE_ID);
     setNumeroLaudo("");
     onClose();
   };
@@ -66,12 +89,33 @@ export function NewLaudoDialog({
       ? { numero_laudo: trimmedNumero }
       : undefined;
 
+    // Cabeçalho oficial: semeia o conteúdo a partir do template
+    // institucional usando a metadata já disponível (numero_laudo
+    // do form) + ocorrência ativa. Campos que não resolvem ficam
+    // omitidos no header — o usuário pode editar depois.
+    const seedMetadata: Record<string, unknown> = {
+      ...(initialMetadata ?? {}),
+    };
+    const seededHeaderContent = seedHeaderContentFromInstitutionalTemplate(
+      PCA_PADRAO_V1,
+      seedMetadata,
+      (occurrence as unknown as Record<string, unknown>) ?? null,
+    );
+    const initialHeader: SicroDocHeader = {
+      enabled: true,
+      content: seededHeaderContent as JSONContent,
+    };
+    const initialLayout = {
+      institutional_template: PCA_PADRAO_V1.id,
+    };
+
     try {
       const laudo = await createLaudo(
         workspacePath,
         { title: trimmed, template_id: templateId },
         initialContent,
         initialMetadata,
+        { layout: initialLayout, header: initialHeader },
       );
       onCreated(laudo);
       close();
@@ -130,27 +174,40 @@ export function NewLaudoDialog({
           />
         </div>
 
-        <div className={styles.field}>
-          <span className={styles.label}>Template</span>
-          <div className={styles.templateList} role="radiogroup">
-            {TEMPLATES.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                role="radio"
-                aria-checked={templateId === t.id}
-                className={`${styles.templateOption} ${
-                  templateId === t.id ? styles.templateOptionActive : ""
-                }`}
-                onClick={() => setTemplateId(t.id)}
-              >
-                <span className={styles.templateName}>{t.name}</span>
-                <span className={styles.templateDescription}>{t.description}</span>
-                <span className={styles.templateCategory}>{t.category}</span>
-              </button>
-            ))}
+        {showTemplatePicker ? (
+          <div className={styles.field}>
+            <span className={styles.label}>Modelo</span>
+            <div className={styles.templateList} role="radiogroup">
+              {TEMPLATES.map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={templateId === t.id}
+                  className={`${styles.templateOption} ${
+                    templateId === t.id ? styles.templateOptionActive : ""
+                  }`}
+                  onClick={() => setTemplateId(t.id)}
+                >
+                  <span className={styles.templateName}>{t.name}</span>
+                  <span className={styles.templateDescription}>
+                    {t.description}
+                  </span>
+                  <span className={styles.templateCategory}>{t.category}</span>
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : (
+          // Único modelo: só mostra a descrição como informação.
+          <div className={styles.field}>
+            <span className={styles.label}>Modelo</span>
+            <div className={styles.singleTemplateInfo}>
+              <strong>{findTemplate(DEFAULT_TEMPLATE_ID).name}</strong>
+              <span>{findTemplate(DEFAULT_TEMPLATE_ID).description}</span>
+            </div>
+          </div>
+        )}
 
         {error && <div className={styles.error}>{error}</div>}
       </form>

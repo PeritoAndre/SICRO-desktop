@@ -68,6 +68,13 @@
   stroke: rgba(0, 0, 0, 0.2);
   stroke-width: 0.5;
   transition: transform 80ms ease;
+  /* CRÍTICO: faz `transform-origin: center` referenciar o centro do
+   * polígono (fill-box), não o centro do viewBox da régua (default
+   * `view-box`). Sem isso, o `scale(1.25)` no estado `.handleActive`
+   * empurrava o handle vários cm em direção ao centro da régua — bug
+   * visível depois que paramos de mover o handle durante o drag. */
+  transform-box: fill-box;
+  transform-origin: center;
 }
 
 /* F7.1 — Handle ativo durante drag: cresce + sombra dourada. */
@@ -76,7 +83,6 @@
   stroke: rgba(0, 0, 0, 0.45);
   stroke-width: 1;
   transform: scale(1.25);
-  transform-origin: center;
 }
 
 /* F7.1 — Linha guia que aparece durante o drag pra reforçar feedback. */
@@ -94,6 +100,10 @@
   stroke: rgba(0, 0, 0, 0.2);
   stroke-width: 0.5;
   transition: transform 0.1s ease;
+  /* Mesma razão do .handle: fill-box pra `transform-origin: center`
+   * escalar em torno do próprio triângulo, não do viewBox da régua. */
+  transform-box: fill-box;
+  transform-origin: center;
 }
 .indentHandleActive {
   fill: #3b82f6;

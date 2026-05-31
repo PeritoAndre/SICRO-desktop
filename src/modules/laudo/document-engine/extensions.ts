@@ -42,6 +42,7 @@ import {
   Figure,
   PhotoPlate,
   Shape,
+  TextBox,
   QuesitoAnswer,
   QuesitoItem,
   QuesitoList,
@@ -148,6 +149,8 @@ export function laudoExtensions(opts?: LaudoExtensionsOptions): Extensions {
     FigCaption,
     // Q — Shape: formas geométricas flutuantes pra anotação.
     Shape,
+    // U — TextBox: caixa de texto editável (objeto), com border/fill/rotation.
+    TextBox,
     // F6 — Prancha fotográfica.
     PhotoPlate,
     Storyboard,

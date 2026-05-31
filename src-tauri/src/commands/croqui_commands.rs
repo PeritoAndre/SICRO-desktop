@@ -159,6 +159,53 @@ pub async fn save_croqui(
     Ok(croqui)
 }
 
+/// Remove o croqui do workspace: apaga a linha do SQLite e remove o
+/// arquivo `.sicrocroqui` em disco. Idempotente para o arquivo —
+/// `NotFound` é silencioso. O PNG exportado, se existir, NÃO é
+/// removido (continua disponível em `croquis/exports/` como
+/// artefato pericial; mantemos o mesmo comportamento de
+/// `delete_storyboard_frame`, que só remove o frame quando flagado).
+///
+/// Audit: registra `croqui.deleted` antes de remover a linha.
+#[tauri::command]
+pub async fn delete_croqui(
+    workspace_path: String,
+    croqui_id: String,
+) -> Result<()> {
+    let ws = PathBuf::from(&workspace_path);
+    let id = Uuid::parse_str(&croqui_id)
+        .map_err(|e| SicroError::Validation(format!("invalid croqui id: {e}")))?;
+
+    let mut conn = open_connection(&ws.join(SQLITE_FILENAME))?;
+    run_migrations(&mut conn)?;
+
+    let croqui = croqui_repo::find_by_id(&conn, &id)?
+        .ok_or_else(|| SicroError::Validation(format!("croqui {} not found", id)))?;
+
+    occurrence_repo::record_audit(
+        &conn,
+        Some(&croqui.occurrence_id),
+        "croqui.deleted",
+        Some("croqui"),
+        Some("croqui"),
+        Some(&croqui.id),
+        Some(&croqui.relative_path),
+    )?;
+
+    croqui_repo::delete(&conn, &id)?;
+
+    let target = ws.join(&croqui.relative_path);
+    match std::fs::remove_file(&target) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(SicroError::Filesystem(format!(
+            "could not delete croqui file at {}: {}",
+            target.display(),
+            e
+        ))),
+    }
+}
+
 /// Persist a PNG export. The frontend builds it via Konva's `toDataURL()`
 /// and ships the bytes base64-encoded. We write to `croquis/exports/` and
 /// update the croqui row with the new path.

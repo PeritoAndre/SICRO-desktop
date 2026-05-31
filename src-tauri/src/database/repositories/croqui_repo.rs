@@ -92,6 +92,16 @@ pub fn touch(
     Ok(())
 }
 
+/// Remove a linha do croqui da tabela. NÃO mexe no `.sicrocroqui` em
+/// disco — o command em `commands/croqui_commands.rs` cuida disso.
+pub fn delete(conn: &Connection, id: &Uuid) -> Result<()> {
+    conn.execute(
+        "DELETE FROM croquis WHERE id = ?1",
+        [id.to_string()],
+    )?;
+    Ok(())
+}
+
 fn row_to_croqui(row: &Row<'_>) -> rusqlite::Result<Croqui> {
     let id: String = row.get("id")?;
     let id = Uuid::parse_str(&id).map_err(|e| {

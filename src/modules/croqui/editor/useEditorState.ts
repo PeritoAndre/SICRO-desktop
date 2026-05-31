@@ -8,7 +8,7 @@
  * the user doing right now?"
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import type { SicroObject, SicroPoint } from "../engine";
 
 /**
@@ -112,66 +112,123 @@ export interface Viewport {
 
 export const DEFAULT_VIEWPORT: Viewport = { scale: 1, x: 0, y: 0 };
 
+/**
+ * Marquee em curso: retângulo em coordenadas WORLD (stage coords, com
+ * viewport aplicado). `null` quando o usuário não está arrastando.
+ * Snapshot dos `selectedIds` no início do drag pra permitir
+ * Shift+drag aditivo no futuro (por ora não usado).
+ */
+export interface Marquee {
+  startWorldX: number;
+  startWorldY: number;
+  currentWorldX: number;
+  currentWorldY: number;
+}
+
 export function useEditorState() {
   const [tool, setTool] = useState<Tool>("select");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // `selectedIds` é a fonte da verdade. `selectedId` (singular) virou
+  // um getter derivado que aponta sempre pra primeira seleção — assim
+  // todo o código antigo que lê `selectedId` continua funcionando
+  // (Inspector mostra o primeiro, etc.), e Delete/Duplicate operam em
+  // TODOS via `selectedIds`. Marquee preenche o array inteiro.
+  const [selectedIds, setSelectedIdsRaw] = useState<string[]>([]);
+  const [marquee, setMarquee] = useState<Marquee | null>(null);
   const [pending, setPending] = useState<PendingTwoClick | null>(null);
   const [roadDraft, setRoadDraft] = useState<RoadDraft | null>(null);
   const [viewport, setViewport] = useState<Viewport>(DEFAULT_VIEWPORT);
   const [pointerWorld, setPointerWorld] = useState<SicroPoint>({ x: 0, y: 0 });
   /**
-   * Road Engine 2.0 — Debug overlay toggle (Fase F4). Transient: vive
-   * só nesse hook, não é persistido no `.sicrocroqui`. Default OFF.
+   * Undo/redo stacks via REFS — leitura síncrona dentro do mesmo event
+   * tick. Antes usávamos useState com `setHistory((h) => { popped = ...; })`
+   * tentando retornar `popped` logo depois — mas no React 18 o updater
+   * é enfileirado, então `popped` continuava `null` quando o caller lia
+   * e o undo nunca aplicava nada (Ctrl+Z parecia quebrado). Com ref a
+   * mutação é instantânea.
+   *
+   * O `historyTick` é um contador useState que incrementamos a cada
+   * push/pop pra forçar re-render dos consumidores que olham comprimento
+   * (`canUndo={editor.history.length > 0}` na Toolbar, por ex).
    */
-  const [roadDebugV2, setRoadDebugV2] = useState(false);
-  /** Undo stack: snapshots of `objects` arrays before each mutation. */
-  const [history, setHistory] = useState<SicroObject[][]>([]);
-  /** Redo stack (MVP 6) — fed by undo, cleared on a fresh mutation. */
-  const [redoStack, setRedoStack] = useState<SicroObject[][]>([]);
+  const historyRef = useRef<SicroObject[][]>([]);
+  const redoRef = useRef<SicroObject[][]>([]);
+  const [, setHistoryTick] = useState(0);
+  const bumpTick = useCallback(() => setHistoryTick((v) => v + 1), []);
 
-  const pushHistory = useCallback((snapshot: SicroObject[]) => {
-    setHistory((h) => {
-      const next = [...h, snapshot];
+  const pushHistory = useCallback(
+    (snapshot: SicroObject[]) => {
+      const cur = historyRef.current;
+      // Dedup: se o último snapshot é o MESMO REFERENCE, não duplica.
+      // Necessário pq React.StrictMode (dev) roda os updaters do setDoc
+      // duas vezes — o `pushHistory` é chamado de dentro do updater do
+      // `mutateObjects`, então sem dedup teríamos 2 entradas idênticas
+      // e cada Ctrl+Z só desfaz "metade" (aparente no-op).
+      if (cur.length > 0 && cur[cur.length - 1] === snapshot) return;
+      const next = [...cur, snapshot];
       // Keep the stack bounded — spike, not a production editor.
       if (next.length > 50) next.shift();
-      return next;
-    });
-    // Any new mutation invalidates the redo branch.
-    setRedoStack([]);
-  }, []);
+      historyRef.current = next;
+      // Any new mutation invalidates the redo branch.
+      redoRef.current = [];
+      bumpTick();
+    },
+    [bumpTick],
+  );
 
   const popHistory = useCallback((): SicroObject[] | null => {
-    let popped: SicroObject[] | null = null;
-    setHistory((h) => {
-      if (h.length === 0) return h;
-      popped = h[h.length - 1] ?? null;
-      return h.slice(0, -1);
-    });
+    const h = historyRef.current;
+    if (h.length === 0) return null;
+    const popped = h[h.length - 1] ?? null;
+    historyRef.current = h.slice(0, -1);
+    bumpTick();
     return popped;
-  }, []);
+  }, [bumpTick]);
 
-  const pushRedo = useCallback((snapshot: SicroObject[]) => {
-    setRedoStack((r) => {
-      const next = [...r, snapshot];
+  const pushRedo = useCallback(
+    (snapshot: SicroObject[]) => {
+      const next = [...redoRef.current, snapshot];
       if (next.length > 50) next.shift();
-      return next;
-    });
-  }, []);
+      redoRef.current = next;
+      bumpTick();
+    },
+    [bumpTick],
+  );
   const popRedo = useCallback((): SicroObject[] | null => {
-    let popped: SicroObject[] | null = null;
-    setRedoStack((r) => {
-      if (r.length === 0) return r;
-      popped = r[r.length - 1] ?? null;
-      return r.slice(0, -1);
-    });
+    const r = redoRef.current;
+    if (r.length === 0) return null;
+    const popped = r[r.length - 1] ?? null;
+    redoRef.current = r.slice(0, -1);
+    bumpTick();
     return popped;
+  }, [bumpTick]);
+
+  // Exposed as plain arrays (read-only). Re-render trigger é o tick.
+  const history = historyRef.current;
+  const redoStack = redoRef.current;
+
+  // Setter "compat" que aceita uma string ou null — equivalente a
+  // selecionar exatamente um (ou limpar).
+  const setSelectedId = useCallback((id: string | null) => {
+    setSelectedIdsRaw(id ? [id] : []);
   }, []);
+  // Setter "multi" — usado pelo marquee e por shortcuts futuros.
+  const setSelectedIds = useCallback((ids: string[]) => {
+    // Dedup defensivo (marquee não deveria repetir, mas garante).
+    setSelectedIdsRaw(Array.from(new Set(ids)));
+  }, []);
+  // Getter derivado: primeira seleção. Inspector e outros lugares que
+  // só sabem operar em 1 objeto continuam funcionando lendo isso.
+  const selectedId: string | null = selectedIds[0] ?? null;
 
   return {
     tool,
     setTool,
     selectedId,
+    selectedIds,
     setSelectedId,
+    setSelectedIds,
+    marquee,
+    setMarquee,
     pending,
     setPending,
     roadDraft,
@@ -186,8 +243,6 @@ export function useEditorState() {
     redoStack,
     pushRedo,
     popRedo,
-    roadDebugV2,
-    setRoadDebugV2,
   };
 }
 

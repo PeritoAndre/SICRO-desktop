@@ -1,55 +1,64 @@
 /**
- * Registry de templates de laudo — barrel público.
+ * Registry de templates de laudo.
  *
- * F5 — Substitui o `templates.ts` legado (que continha apenas 2
- * templates). Agora temos 8:
+ * Hoje só há um template ativo:
+ *   - "Documento em branco" (`documento_em_branco`)
  *
- *   - Documento livre        (genérico)
- *   - Em branco              (genérico — só título)
- *   - Laudo genérico         (genérico — estrutura mínima)
- *   - Sinistro de Trânsito   (trânsito — completo)
- *   - Arrombamento           (local de crime)
- *   - Local de Crime         (local de crime)
- *   - Avaliação Merceológica (avaliação)
- *   - Constatação            (genérico)
- *   - Exame Veicular         (trânsito)
+ * Cada novo laudo já nasce com o **cabeçalho oficial** PCA — Polícia
+ * Científica do Amapá — ligado por padrão (ver `NewLaudoDialog`). O
+ * `build()` do template só preenche o corpo.
  *
- * O caller chama `findTemplate(id)` para obter um template ou cai no
- * default ("Documento livre").
+ * ---
+ *
+ * Como criar novos templates:
+ *   1. Crie um arquivo `templates/<id>.ts` exportando uma constante
+ *      do tipo `LaudoTemplate`.
+ *   2. Use os helpers de `helpers.ts` (`heading`, `paragraph`,
+ *      `styledParagraph`, `sentence`, `quesitoList`, `signatureBlock`,
+ *      `field({key})`) para montar o `build(title, occurrence)`.
+ *   3. Importe e acrescente em `TEMPLATES` abaixo.
+ *
+ * Como "salvar um laudo editado como template":
+ *   Hoje templates são código TypeScript — não há UI pra salvar a
+ *   partir do editor. O fluxo é: você cria o laudo, salva, e me
+ *   pede pra transformar o `.sicrodoc` num arquivo de template.
+ *   No futuro podemos adicionar um botão "Salvar como modelo".
+ *
+ * Aliases legados: laudos antigos com `template_id` apontando pros
+ * 8 modelos removidos (sinistro_transito, arrombamento, etc.)
+ * caem no fallback `documento_em_branco` em `findTemplate`.
  */
 
-import { arrombamento } from "./arrombamento";
-import { avaliacaoMerceologica } from "./avaliacao-merceologica";
-import { constatacao } from "./constatacao";
-import { documentoLivre } from "./documento-livre";
-import { emBranco } from "./em-branco";
-import { exameVeicular } from "./exame-veicular";
-import { generico } from "./generico";
-import { localCrime } from "./local-crime";
-import { sinistroTransito } from "./sinistro-transito";
+import { documentoEmBranco } from "./documento-em-branco";
 
 export type { LaudoTemplate, OccurrenceContext } from "./types";
 
-export const TEMPLATES = [
-  documentoLivre,
-  emBranco,
-  generico,
-  sinistroTransito,
-  arrombamento,
-  localCrime,
-  avaliacaoMerceologica,
-  constatacao,
-  exameVeicular,
-] as const;
+export const TEMPLATES = [documentoEmBranco] as const;
 
+/** Retorna o template pelo `id` ou cai no padrão (`documento_em_branco`). */
 export function findTemplate(id: string) {
-  return TEMPLATES.find((t) => t.id === id) ?? documentoLivre;
+  return TEMPLATES.find((t) => t.id === id) ?? documentoEmBranco;
 }
 
-// F5 — Mantemos o alias `sinistro_transito_simples` no registry para
-// que laudos LEGADOS (criados antes do F5) continuem encontrando seu
-// template ao reabrir. Caso novo: usa `sinistro_transito`.
+/**
+ * Variante que mapeia IDs legados (templates removidos) para o
+ * padrão atual. Útil ao reabrir laudos antigos que ainda guardam
+ * `template_id` apontando pra um modelo que não existe mais.
+ */
+const LEGACY_ALIASES = new Set<string>([
+  "documento_livre",
+  "em_branco",
+  "generico",
+  "sinistro_transito",
+  "sinistro_transito_simples",
+  "arrombamento",
+  "local_crime",
+  "avaliacao_merceologica",
+  "constatacao",
+  "exame_veicular",
+]);
+
 export function findTemplateWithLegacyAlias(id: string) {
-  if (id === "sinistro_transito_simples") return sinistroTransito;
+  if (LEGACY_ALIASES.has(id)) return documentoEmBranco;
   return findTemplate(id);
 }

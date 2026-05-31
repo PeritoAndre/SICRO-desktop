@@ -56,12 +56,16 @@ import { useLaudoShortcuts } from "../hooks/useLaudoShortcuts";
 import { useZoom } from "../hooks/useZoom";
 import { useEditorMode } from "../hooks/useEditorMode";
 import { useDragDropPhotos } from "../hooks/useDragDropPhotos";
+import { usePasteImage } from "../hooks/usePasteImage";
 import { useSelectedFigure } from "../hooks/useSelectedFigure";
 // Q — Hook + overlay pra formas (rect, ellipse, arrow, line).
 import { useSelectedShape } from "../hooks/useSelectedShape";
 import { PhotoDropOverlay } from "../components/PhotoDropOverlay";
 import { FigureOverlay } from "../components/FigureOverlay";
 import { ShapeOverlay } from "../components/ShapeOverlay";
+// U — TextBox overlay + hook.
+import { useSelectedTextBox } from "../hooks/useSelectedTextBox";
+import { TextBoxOverlay } from "../components/TextBoxOverlay";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { formatRelative } from "@core/formatters";
 import { toSicroError } from "@core/errors";
@@ -84,6 +88,10 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
   const saveCurrent = useLaudoStore((s) => s.saveCurrent);
   const setHeader = useLaudoStore((s) => s.setHeader);
   const lastError = useLaudoStore((s) => s.lastError);
+  // U1 — Pós-laudo: roteamento da toolbar pro editor ativo.
+  // Quando `editingRegion === "header"`, comandos da toolbar (font size,
+  // bold, cor, etc.) devem ir pro headerEditor; caso contrário, pro body.
+  const editingRegion = useLaudoStore((s) => s.editingRegion);
   const activeOccurrence = useWorkspaceStore((s) => s.activeOccurrence);
 
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -185,33 +193,29 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
     [currentLaudo?.id],
   );
 
-  // O — Drag & drop de fotos: hook registra listener do Tauri
-  // `onDragDropEvent`. No drop bem-sucedido, insere `figure` nodes no
-  // editor na posição do mouse via `view.posAtCoords`. Plugado APÓS o
-  // useEditor pra ter acesso à instância.
-  const dragDrop = useDragDropPhotos({
-    enabled: !!editor && mode !== "leitura",
-    workspacePath,
-    laudoId: currentLaudo?.id ?? null,
-    onImported: (photos, dropPos) => {
-      if (!editor) return;
-      const view = editor.view;
-      const posInfo = view.posAtCoords({
-        left: dropPos.x,
-        top: dropPos.y,
-      });
-      const insertPos = posInfo?.pos ?? editor.state.doc.content.size;
-
-      // O — Usa o command oficial `insertFigure` em vez de montar a
-      // estrutura crua. Razões:
-      //  1. ProseMirror não aceita text nodes vazios — meu figcaption
-      //     com `text: ""` quebrava o insert silenciosamente.
-      //  2. O command cuida de gerar um UUID estável (`id` attr),
-      //     necessário pra cross-references e auto-numeração (F12.1).
-      // Posicionamento: setTextSelection(pos) move o cursor antes do
-      // insert. A primeira foto vai onde o user soltou; as próximas
-      // empilham após a última inserida.
-      editor.chain().focus().setTextSelection(insertPos).run();
+  // O — Função compartilhada de inserção de fotos em UM editor TipTap.
+  // Os fluxos (drag&drop body, paste body, paste header) deságuam aqui
+  // depois do backend ter copiado o binário e devolvido
+  // `ImportedPhoto[]`.
+  //
+  // `targetEditor`: o editor de destino — pode ser o body (`editor`)
+  // ou o header (`headerEditor`). Não pegamos de fora pra evitar que o
+  // header e o body briguem pelo mesmo callback.
+  //
+  // `insertPos` opcional: drag&drop passa a posição calculada via
+  // `view.posAtCoords` (onde o mouse soltou); paste passa undefined
+  // pra usar a seleção atual do cursor (onde o user pressionou Ctrl+V).
+  const insertPhotosIntoEditor = useCallback(
+    (
+      targetEditor: import("@tiptap/react").Editor,
+      photos: import("@domain/photo_drop").ImportedPhoto[],
+      insertPos?: number,
+    ) => {
+      if (typeof insertPos === "number") {
+        targetEditor.chain().focus().setTextSelection(insertPos).run();
+      } else {
+        targetEditor.chain().focus().run();
+      }
       for (const photo of photos) {
         const absolutePath = joinWorkspace(
           workspacePath,
@@ -234,7 +238,7 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
         const captionDefault =
           photo.original_filename.replace(/\.[^.]+$/, "") ||
           "Descrição da figura.";
-        editor
+        targetEditor
           .chain()
           .focus()
           .insertFigure({
@@ -250,6 +254,34 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
           })
           .run();
       }
+    },
+    [workspacePath],
+  );
+
+  // O — Drag & drop de fotos: hook registra listener do Tauri
+  // `onDragDropEvent`. No drop bem-sucedido, insere `figure` nodes no
+  // editor na posição do mouse via `view.posAtCoords`. Plugado APÓS o
+  // useEditor pra ter acesso à instância.
+  //
+  // Usa o command oficial `insertFigure` em vez de montar a estrutura
+  // crua. Razões:
+  //  1. ProseMirror não aceita text nodes vazios — figcaption com
+  //     `text: ""` quebrava o insert silenciosamente.
+  //  2. O command cuida de gerar um UUID estável (`id` attr),
+  //     necessário pra cross-references e auto-numeração (F12.1).
+  const dragDrop = useDragDropPhotos({
+    enabled: !!editor && mode !== "leitura",
+    workspacePath,
+    laudoId: currentLaudo?.id ?? null,
+    onImported: (photos, dropPos) => {
+      if (!editor) return;
+      const view = editor.view;
+      const posInfo = view.posAtCoords({
+        left: dropPos.x,
+        top: dropPos.y,
+      });
+      const insertPos = posInfo?.pos ?? editor.state.doc.content.size;
+      insertPhotosIntoEditor(editor, photos, insertPos);
       dragDrop.reset();
     },
     onErrors: (errors) => {
@@ -264,9 +296,40 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
     },
   });
 
+  // T — Paste (Ctrl+V) de fotos: hook attacha listener no
+  // `editor.view.dom` (capture phase, antes do ProseMirror) e
+  // intercepta paste com imagens — bitmap raw (screenshot/browser) ou
+  // `File` do Explorer copy. Bytes vão pro backend em base64; o backend
+  // reusa o mesmo pipeline do drop. Inserção na seleção atual (cursor
+  // onde o user pressionou Ctrl+V).
+  const pasteImage = usePasteImage({
+    enabled: !!editor && mode !== "leitura",
+    editor,
+    workspacePath,
+    laudoId: currentLaudo?.id ?? null,
+    onImported: (photos) => {
+      if (!editor) return;
+      // Sem insertPos: usa seleção atual do cursor.
+      insertPhotosIntoEditor(editor, photos);
+      pasteImage.reset();
+    },
+    onErrors: (errors) => {
+      // eslint-disable-next-line no-console
+      console.warn("[paste-image] errors", errors);
+      setLocalError(
+        `Algumas fotos falharam: ${errors
+          .slice(0, 3)
+          .map((e) => e.reason)
+          .join(", ")}`,
+      );
+    },
+  });
+
   // P — Detecta se há um figure selecionado pra renderizar handles.
   const selectedFigure = useSelectedFigure(editor);
   const selectedShape = useSelectedShape(editor);
+  // U — Detecta TextBox selecionada (body + header) pra renderizar overlay.
+  const selectedTextBox = useSelectedTextBox(editor);
 
   // Pós-laudo S — referência opcional ao editor TipTap do cabeçalho.
   // EditorPage instancia o `headerEditor` internamente via `useHeaderEditor`;
@@ -278,6 +341,38 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
     import("@tiptap/react").Editor | null
   >(null);
   const selectedHeaderFigure = useSelectedFigure(headerEditor);
+  // U — TextBox no header também (mesma instrumentação).
+  const selectedHeaderTextBox = useSelectedTextBox(headerEditor);
+
+  // T — Paste de fotos NO CABEÇALHO. O headerEditor é uma instância
+  // TipTap separada (gerenciada pelo `useHeaderEditor` dentro do
+  // EditorPage). Quando o cursor tá no header, o evento `paste` cai
+  // no DOM dele — não no do body — então precisamos atachar um
+  // listener próprio aqui, senão o ProseMirror do header faz default
+  // insertion (img inerte sem nossos attrs/handles).
+  //
+  // Mesmo callback de inserção, só que mira o headerEditor.
+  const headerPasteImage = usePasteImage({
+    enabled: !!headerEditor && mode !== "leitura",
+    editor: headerEditor,
+    workspacePath,
+    laudoId: currentLaudo?.id ?? null,
+    onImported: (photos) => {
+      if (!headerEditor) return;
+      insertPhotosIntoEditor(headerEditor, photos);
+      headerPasteImage.reset();
+    },
+    onErrors: (errors) => {
+      // eslint-disable-next-line no-console
+      console.warn("[paste-image:header] errors", errors);
+      setLocalError(
+        `Algumas fotos do cabeçalho falharam: ${errors
+          .slice(0, 3)
+          .map((e) => e.reason)
+          .join(", ")}`,
+      );
+    },
+  });
 
   // ─────────────────────────────────────────────────────────────────
   // Pós-laudo S — Round-trip Laudo ↔ Editor de Imagem.
@@ -711,7 +806,13 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
       <EditorMenuBar doc={docForInspector} editor={editor} />
 
       <EditorToolbar
-        editor={editor}
+        editor={
+          // U1 — Quando o user tá editando o header, a toolbar precisa
+          // mirar o headerEditor pra que font-size, bold, cor, etc.
+          // afetem o cabeçalho. Fallback pro body quando headerEditor
+          // ainda não foi instanciado (race no mount).
+          editingRegion === "header" && headerEditor ? headerEditor : editor
+        }
         isSaving={isSaving}
         isPreviewOpen={previewOpen}
         onSave={handleSave}
@@ -799,10 +900,27 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
             )}
             {/* O — Overlay do drag-and-drop de fotos. Aparece sobre o
                 editor quando o user arrasta arquivos do Windows Explorer.
-                Posição é coberta pelo `position: relative` do .editorRegion. */}
+                Posição é coberta pelo `position: relative` do .editorRegion.
+                T — Reaproveitado pra paste (body) e paste (header).
+                Quando o usuário cola uma foto via Ctrl+V, o overlay
+                mostra "Importando…" durante a transferência base64 →
+                backend → workspace. Prioridade: drag > body paste >
+                header paste (a sobreposição entre os três é rara). */}
             <PhotoDropOverlay
-              state={dragDrop.state}
-              errorMessage={dragDrop.errorMessage}
+              state={
+                dragDrop.state !== "idle"
+                  ? dragDrop.state
+                  : pasteImage.state !== "idle"
+                    ? pasteImage.state
+                    : headerPasteImage.state
+              }
+              errorMessage={
+                dragDrop.state !== "idle"
+                  ? dragDrop.errorMessage
+                  : pasteImage.state !== "idle"
+                    ? pasteImage.errorMessage
+                    : headerPasteImage.errorMessage
+              }
             />
             {/* P — Overlay com handles de resize/rotate + floating toolbar
                 pra figura selecionada. Renderiza nada quando não há
@@ -834,6 +952,26 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
               selected={selectedShape}
               containerRef={editorRegionRef}
             />
+            {/* U — TextBox overlay: handles + toolbar com controles de
+                border/fill/rotação. Body + header (2 instâncias). */}
+            <TextBoxOverlay
+              editor={editor}
+              selected={selectedTextBox}
+              containerRef={editorRegionRef}
+            />
+            {headerEditor && (
+              <TextBoxOverlay
+                editor={headerEditor}
+                selected={selectedHeaderTextBox}
+                containerRef={editorRegionRef}
+                onBeforeEnterTextEdit={() => {
+                  // U fix — header textbox dblclick ativa header mode
+                  // pra editor ficar editable, senão a TextSelection é
+                  // setada num editor read-only e nada acontece.
+                  useLaudoStore.getState().setEditingRegion("header");
+                }}
+              />
+            )}
           </div>
           {showInspector && (
             <Inspector

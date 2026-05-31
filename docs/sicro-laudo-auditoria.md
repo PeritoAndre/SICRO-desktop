@@ -107,10 +107,10 @@ src-tauri/src/
 
 ### 2.3. Documentação relacionada
 
-- `SPIKE_B_RELATORIO.md` — TipTap engine + schema + extensions
-- `SPIKE_C_RELATORIO.md` — exportadores PDF/DOCX/HTML
-- `MVP2_LAUDO_INSTITUCIONAL_RELATORIO.md` — chrome institucional, templates, quesito/assinatura, paginação visual
-- `MVP4_EVIDENCIAS_NO_LAUDO_RELATORIO.md` — evidence nodes (Figure/Storyboard/EvidenceTable), assets loader, DOCX walker image embed
+- `docs/archive/SPIKE_B_RELATORIO.md` — TipTap engine + schema + extensions
+- `docs/archive/SPIKE_C_RELATORIO.md` — exportadores PDF/DOCX/HTML
+- `docs/archive/MVP2_LAUDO_INSTITUCIONAL_RELATORIO.md` — chrome institucional, templates, quesito/assinatura, paginação visual
+- `docs/archive/MVP4_EVIDENCIAS_NO_LAUDO_RELATORIO.md` — evidence nodes (Figure/Storyboard/EvidenceTable), assets loader, DOCX walker image embed
 
 ---
 

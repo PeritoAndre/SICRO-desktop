@@ -7,9 +7,11 @@
  */
 
 import { useEffect, useState } from "react";
-import { FileText, Plus } from "lucide-react";
+import type { MouseEvent } from "react";
+import { FileText, Plus, Trash2 } from "lucide-react";
 import { Button } from "@components/Button/Button";
 import { Card } from "@components/Card/Card";
+import { ConfirmDialog } from "@components/Dialog/ConfirmDialog";
 import { EmptyState } from "@components/EmptyState/EmptyState";
 import { StatusPill } from "@components/StatusPill/StatusPill";
 import { formatRelative } from "@core/formatters";
@@ -38,9 +40,38 @@ export function LaudoListView({
   const isMutating = useLaudoStore((s) => s.isMutating);
   const error = useLaudoStore((s) => s.lastError);
   const loadList = useLaudoStore((s) => s.loadList);
+  const deleteLaudo = useLaudoStore((s) => s.deleteLaudo);
   const activeOccurrence = useWorkspaceStore((s) => s.activeOccurrence);
 
   const [dialogOpen, setDialogOpen] = useState(false);
+  // Laudo aguardando confirmação de exclusão. `null` significa que
+  // não há popup aberto. Trocamos `window.confirm` por um modal
+  // próprio pra dar ao usuário um segundo pra respirar antes de
+  // apagar um trabalho.
+  const [pendingDelete, setPendingDelete] = useState<Laudo | null>(null);
+
+  // Botão de exclusão de cada card: abre o popup de confirmação.
+  // `stopPropagation` evita que o clique abra o laudo através do
+  // `Card interactive` que envolve o conteúdo.
+  const handleDeleteClick = (
+    e: MouseEvent<HTMLButtonElement>,
+    laudo: Laudo,
+  ) => {
+    e.stopPropagation();
+    setPendingDelete(laudo);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete) return;
+    const target = pendingDelete;
+    try {
+      await deleteLaudo(workspacePath, target.id);
+    } finally {
+      // Fechamos sempre, mesmo em caso de erro — o erro fica
+      // exibido no banner geral via `lastError`.
+      setPendingDelete(null);
+    }
+  };
 
   useEffect(() => {
     void loadList(workspacePath);
@@ -112,6 +143,16 @@ export function LaudoListView({
                       {/* H — Badge de assinatura digital (gov.br/A1/A3/mock) */}
                       <SignatureBadge type={laudo.signature_type ?? null} />
                       <StatusPill status={mapLaudoStatus(laudo.status)} />
+                      <button
+                        type="button"
+                        className={styles.deleteBtn}
+                        title="Excluir laudo"
+                        aria-label={`Excluir laudo ${laudo.title}`}
+                        disabled={isMutating}
+                        onClick={(e) => handleDeleteClick(e, laudo)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </div>
                   <code className={styles.path}>{laudo.relative_path}</code>
@@ -135,6 +176,30 @@ export function LaudoListView({
         onCreated={() => {
           onCreate();
         }}
+      />
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Excluir laudo"
+        destructive
+        confirmLabel="Excluir laudo"
+        cancelLabel="Cancelar"
+        busy={isMutating}
+        message={
+          pendingDelete ? (
+            <>
+              Tem certeza que deseja excluir o laudo{" "}
+              <strong>"{pendingDelete.title}"</strong>?
+            </>
+          ) : (
+            ""
+          )
+        }
+        detail="Esta ação não pode ser desfeita. O arquivo será removido do workspace e o registro será apagado."
+        onCancel={() => {
+          if (!isMutating) setPendingDelete(null);
+        }}
+        onConfirm={() => void handleConfirmDelete()}
       />
     </div>
   );

@@ -22,9 +22,15 @@ describe("useZoom — limites de zoom", () => {
     expect(clamp(-1)).toBe(ZOOM_MIN);
   });
 
-  it("clamp respeita ZOOM_MAX (2.0)", () => {
-    expect(clamp(2.5)).toBe(ZOOM_MAX);
+  it("clamp respeita ZOOM_MAX (5.0)", () => {
+    expect(clamp(5.5)).toBe(ZOOM_MAX);
     expect(clamp(100)).toBe(ZOOM_MAX);
+  });
+
+  it("valores entre 2.0 e 5.0 (faixa nova) NÃO são clampados", () => {
+    expect(clamp(2.5)).toBe(2.5);
+    expect(clamp(3.0)).toBe(3.0);
+    expect(clamp(5.0)).toBe(5.0);
   });
 
   it("quantiza para 2 casas decimais (valores dentro do range)", () => {

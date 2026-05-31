@@ -82,6 +82,7 @@ export interface MakeParityRoundaboutOptions {
   largura_m?: number;
   superficie?: ParitySuperficie;
   inner_color?: string;
+  marcacao?: ParityMarcacao;
   label?: string | null;
   metadata_json?: string | null;
   visible?: boolean;
@@ -235,6 +236,11 @@ export function makeParityRoundabout(
   // Quando ausente, renderer aplica `#3A6535` (default Python).
   if (opts.inner_color !== undefined) {
     out.inner_color = opts.inner_color;
+  }
+  // `marcacao` opcional — quando ausente, renderer não desenha o eixo
+  // central tracejado do anel.
+  if (opts.marcacao !== undefined) {
+    out.marcacao = opts.marcacao;
   }
 
   return out;

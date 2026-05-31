@@ -24,8 +24,8 @@
  * Versão de schema-alvo: `.sicrocroqui` v0.4.
  *
  * Documentação de referência:
- *   - `ROAD_ENGINE_PYTHON_PARITY_SPEC.md` §1, §2 (campos).
- *   - `ROAD_ENGINE_1_PYTHON_AUDIT.md` (origem do Python).
+ *   - `docs/archive/ROAD_ENGINE_PYTHON_PARITY_SPEC.md` §1, §2 (campos).
+ *   - `docs/archive/ROAD_ENGINE_1_PYTHON_AUDIT.md` (origem do Python).
  *   - `desenho/spline_via.py` (modelo `_via_spline`).
  *   - `desenho/osm_via.py` (modelo `_rotatoria` + tabela `_LARG_CLASSE`).
  */
@@ -195,13 +195,29 @@ export interface SicroRoundaboutObject_parity {
   r_m: number;
   largura_m: number;
 
-  // --- Aparência (2 campos) ---
+  // --- Aparência (3 campos) ---
   superficie: ParitySuperficie;
   /**
    * Cor da ilha central. Opcional. Quando ausente, renderer aplica
    * `#3A6535` (verde canteiro padrão SICRO 1.0 Python).
    */
   inner_color?: string;
+  /**
+   * Marcação central do anel — linha tracejada circular no raio médio
+   * do anel (entre borda externa e borda interna). Análoga ao eixo
+   * central de uma via reta. Opcional.
+   *
+   *   - `amarela`  → eixo tracejado amarelo (rotatórias com fluxo
+   *                  bidirecional, típico de arteriais).
+   *   - `branca`   → eixo tracejado branco (rotatórias com pistas
+   *                  separadas).
+   *   - `nenhuma`  → sem linha central (default — bem comum em mini
+   *                  rotatórias e rotatórias urbanas pequenas).
+   *
+   * Quando ausente, o renderer NÃO desenha linha tracejada (mesmo
+   * comportamento que `"nenhuma"`).
+   */
+  marcacao?: ParityMarcacao;
 
   // --- Estado da UI (3 campos) ---
   visible: boolean;

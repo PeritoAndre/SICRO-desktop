@@ -52,18 +52,35 @@ interface LaudoState {
    * what the editor will show. `initialMetadata` is merged into the envelope
    * metadata and is the place where MVP 2 stores `numero_laudo` / `setor`
    * from the NewLaudoDialog.
+   *
+   * `initialEnvelope` é a "porta dos fundos" pra setar layout/header
+   * iniciais. Usado pelo NewLaudoDialog pra já ligar o
+   * `institutional_template = pca_padrao_v1` e semear o
+   * `header.content` com o cabeçalho oficial. Faz isso aqui (em vez
+   * de chamadas extras) pra economizar 2 saves redundantes na criação.
    */
   createLaudo: (
     workspacePath: string,
     input: NewLaudoInput,
     initialContent?: JSONContent,
     initialMetadata?: Record<string, unknown>,
+    initialEnvelope?: {
+      layout?: Partial<SicroDocLayout>;
+      header?: SicroDocHeader;
+    },
   ) => Promise<Laudo>;
   openLaudo: (workspacePath: string, laudoId: string) => Promise<SicroDoc>;
   saveCurrent: (
     workspacePath: string,
     content: SicroDoc["content"],
   ) => Promise<Laudo>;
+  /**
+   * Remove o laudo do workspace (linha + `.sicrodoc`). Remove o item
+   * da `list` em memória; se for o laudo aberto no editor, limpa
+   * `currentLaudo`/`currentDoc` para forçar o caller a voltar pra
+   * lista.
+   */
+  deleteLaudo: (workspacePath: string, laudoId: string) => Promise<void>;
   /**
    * Patch `currentDoc.metadata` and persist via `save_laudo`. Used by the
    * Inspector "Cabeçalho" tab so the institutional header (numero_laudo,
@@ -138,28 +155,43 @@ export const useLaudoStore = create<LaudoState>((set, get) => ({
     }
   },
 
-  async createLaudo(workspacePath, input, initialContent, initialMetadata) {
+  async createLaudo(
+    workspacePath,
+    input,
+    initialContent,
+    initialMetadata,
+    initialEnvelope,
+  ) {
     set({ isMutating: true, lastError: null });
     try {
       const payload = await commands.createLaudo(workspacePath, input);
       let doc = coerceSicroDoc(payload.doc);
 
-      // If a template seeded the content OR initial metadata was supplied,
-      // persist RIGHT AWAY so the disk file equals what the editor renders.
-      // Without this, the user's first open of the freshly-created laudo
-      // would still see the empty paragraph from `create_laudo`.
+      // If a template seeded the content OR initial metadata was supplied
+      // OR an initial layout/header was passed (e.g. para semear o
+      // cabeçalho oficial), persist RIGHT AWAY so the disk file equals
+      // what the editor renders. Sem isso, o primeiro open do laudo
+      // mostraria o parágrafo vazio do `create_laudo` puro.
       let laudoRow = payload.laudo;
       const hasInitialContent = !!initialContent;
       const hasInitialMetadata =
         !!initialMetadata && Object.keys(initialMetadata).length > 0;
+      const hasInitialEnvelope =
+        !!initialEnvelope &&
+        (!!initialEnvelope.layout || !!initialEnvelope.header);
 
-      if (hasInitialContent || hasInitialMetadata) {
+      if (hasInitialContent || hasInitialMetadata || hasInitialEnvelope) {
+        const nextLayout: SicroDocLayout = initialEnvelope?.layout
+          ? { ...doc.layout, ...initialEnvelope.layout }
+          : doc.layout;
         const nextDoc: SicroDoc = {
           ...doc,
           content: initialContent ?? doc.content,
           metadata: hasInitialMetadata
             ? { ...(doc.metadata ?? {}), ...initialMetadata }
             : doc.metadata,
+          layout: nextLayout,
+          header: initialEnvelope?.header ?? doc.header,
           updated_at: new Date().toISOString(),
         };
         try {
@@ -256,6 +288,30 @@ export const useLaudoStore = create<LaudoState>((set, get) => ({
         isMutating: false,
       });
       return doc;
+    } catch (err) {
+      const e = toSicroError(err);
+      set({ isMutating: false, lastError: e });
+      throw e;
+    }
+  },
+
+  async deleteLaudo(workspacePath, laudoId) {
+    set({ isMutating: true, lastError: null });
+    try {
+      await commands.deleteLaudo(workspacePath, laudoId);
+      set((s) => {
+        const wasCurrent = s.currentLaudo?.id === laudoId;
+        return {
+          list: s.list.filter((l) => l.id !== laudoId),
+          // Se o laudo deletado estava aberto no editor, limpa a
+          // referência para forçar o caller a voltar pra lista
+          // (caso contrário o editor mostraria um doc órfão).
+          currentLaudo: wasCurrent ? null : s.currentLaudo,
+          currentDoc: wasCurrent ? null : s.currentDoc,
+          editingRegion: wasCurrent ? "body" : s.editingRegion,
+          isMutating: false,
+        };
+      });
     } catch (err) {
       const e = toSicroError(err);
       set({ isMutating: false, lastError: e });

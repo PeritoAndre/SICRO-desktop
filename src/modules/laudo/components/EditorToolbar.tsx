@@ -33,6 +33,7 @@ import {
   Strikethrough,
   Subscript as SubscriptIcon,
   Superscript as SuperscriptIcon,
+  TextCursorInput,
   Underline as UnderlineIcon,
 } from "lucide-react";
 // (useState já é importado mais abaixo no arquivo via o sub-componente
@@ -47,18 +48,61 @@ import styles from "./EditorToolbar.module.css";
 
 // F2 — Edição rica.
 //
-// Catálogos de fontes e tamanhos exibidos nos dropdowns. Lista deliberadamente
-// curta para evitar paralisia de escolha — peritos usam tipicamente 3-4 fontes
-// padrão e tamanhos institucionais. Caller pode usar `setFontFamily(family)`
-// com qualquer string CSS válida se precisar de algo fora desta lista.
+// Catálogo de fontes. Inclui todas as fontes nativas do Windows
+// (deployment alvo) + fallbacks razoáveis pra macOS/Linux. Browser
+// faz fallback gracioso se a fonte específica não estiver instalada.
+// Caller pode usar `setFontFamily(family)` com qualquer string CSS
+// válida se precisar de algo fora desta lista.
 const FONT_FAMILIES: ReadonlyArray<{ value: string; label: string }> = [
   { value: "", label: "Fonte padrão" },
+  // Sans-serif comuns
   { value: "Arial, sans-serif", label: "Arial" },
-  { value: "Times New Roman, serif", label: "Times New Roman" },
+  { value: "'Arial Black', sans-serif", label: "Arial Black" },
+  { value: "'Arial Narrow', sans-serif", label: "Arial Narrow" },
+  { value: "Bahnschrift, sans-serif", label: "Bahnschrift" },
   { value: "Calibri, sans-serif", label: "Calibri" },
-  { value: "Cambria, serif", label: "Cambria" },
+  { value: "'Calibri Light', sans-serif", label: "Calibri Light" },
+  { value: "Candara, sans-serif", label: "Candara" },
+  { value: "'Century Gothic', sans-serif", label: "Century Gothic" },
+  { value: "Corbel, sans-serif", label: "Corbel" },
+  { value: "'Franklin Gothic Medium', sans-serif", label: "Franklin Gothic Medium" },
+  { value: "Gadugi, sans-serif", label: "Gadugi" },
+  { value: "Helvetica, Arial, sans-serif", label: "Helvetica" },
+  { value: "Impact, sans-serif", label: "Impact" },
+  { value: "'Lucida Sans Unicode', sans-serif", label: "Lucida Sans Unicode" },
+  { value: "'Microsoft Sans Serif', sans-serif", label: "Microsoft Sans Serif" },
+  { value: "'MS Sans Serif', sans-serif", label: "MS Sans Serif" },
+  { value: "'Segoe UI', sans-serif", label: "Segoe UI" },
+  { value: "'Segoe UI Light', sans-serif", label: "Segoe UI Light" },
+  { value: "'Segoe UI Semibold', sans-serif", label: "Segoe UI Semibold" },
+  { value: "'Segoe UI Black', sans-serif", label: "Segoe UI Black" },
+  { value: "Tahoma, sans-serif", label: "Tahoma" },
+  { value: "'Trebuchet MS', sans-serif", label: "Trebuchet MS" },
   { value: "Verdana, sans-serif", label: "Verdana" },
-  { value: "Courier New, monospace", label: "Courier New" },
+  { value: "'Yu Gothic UI', sans-serif", label: "Yu Gothic UI" },
+  // Serif (texto institucional)
+  { value: "Cambria, serif", label: "Cambria" },
+  { value: "'Cambria Math', serif", label: "Cambria Math" },
+  { value: "Constantia, serif", label: "Constantia" },
+  { value: "Garamond, serif", label: "Garamond" },
+  { value: "Georgia, serif", label: "Georgia" },
+  { value: "'Palatino Linotype', serif", label: "Palatino Linotype" },
+  { value: "'Book Antiqua', serif", label: "Book Antiqua" },
+  { value: "'Bookman Old Style', serif", label: "Bookman Old Style" },
+  { value: "Rockwell, serif", label: "Rockwell" },
+  { value: "Sylfaen, serif", label: "Sylfaen" },
+  { value: "'Times New Roman', serif", label: "Times New Roman" },
+  { value: "'MS Serif', serif", label: "MS Serif" },
+  // Monospace
+  { value: "Consolas, monospace", label: "Consolas" },
+  { value: "'Courier New', monospace", label: "Courier New" },
+  { value: "'Lucida Console', monospace", label: "Lucida Console" },
+  // Display / decorativas (uso pontual em capa, marca d'água)
+  { value: "'Comic Sans MS', cursive", label: "Comic Sans MS" },
+  { value: "'Brush Script MT', cursive", label: "Brush Script MT" },
+  { value: "'Ink Free', cursive", label: "Ink Free" },
+  { value: "'MV Boli', cursive", label: "MV Boli" },
+  { value: "Gabriola, serif", label: "Gabriola" },
 ];
 
 const FONT_SIZES: ReadonlyArray<string> = [
@@ -75,25 +119,10 @@ const FONT_SIZES: ReadonlyArray<string> = [
   "24pt",
 ];
 
-// Paleta de cores enxuta para texto + realce. Cobre as cores periciais
-// comuns: preto/cinza, vermelho (atenção), azul (referência), verde (ok),
-// amarelo (marca-texto padrão).
-const FONT_COLORS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: "#0f172a", label: "Preto" },
-  { value: "#475569", label: "Cinza" },
-  { value: "#dc2626", label: "Vermelho" },
-  { value: "#2563eb", label: "Azul" },
-  { value: "#16a34a", label: "Verde" },
-  { value: "#ca8a04", label: "Ocre" },
-];
-
-const HIGHLIGHT_COLORS: ReadonlyArray<{ value: string; label: string }> = [
-  { value: "#fde68a", label: "Amarelo" },
-  { value: "#bbf7d0", label: "Verde" },
-  { value: "#bfdbfe", label: "Azul" },
-  { value: "#fecaca", label: "Rosa" },
-  { value: "#e9d5ff", label: "Lilás" },
-];
+// As paletas FONT_COLORS / HIGHLIGHT_COLORS antigas foram substituídas pelo
+// `ColorPickerPro` (S/V pad + hue slider + paleta de 40 + recentes), que
+// vive em `ColorPickerPro.tsx`. O wrapper `ColorPickerBtn` no fim deste
+// arquivo apenas abre o picker como popover.
 
 interface EditorToolbarProps {
   editor: Editor | null;
@@ -528,7 +557,6 @@ export function EditorToolbar({
           icon={<Palette size={14} />}
           label="Cor do texto"
           current={currentColor}
-          palette={FONT_COLORS}
           onSelect={setColor}
           onClear={unsetColor}
         />
@@ -536,7 +564,6 @@ export function EditorToolbar({
           icon={<Highlighter size={14} />}
           label="Marca-texto"
           current={editor.getAttributes("highlight")["color"] as string | undefined}
-          palette={HIGHLIGHT_COLORS}
           onSelect={setHighlight}
           onClear={unsetHighlight}
         />
@@ -617,6 +644,11 @@ export function EditorToolbar({
 
       {/* Q — Botão Inserir Forma com dropdown */}
       <InsertShapeMenu editor={editor} />
+
+      {/* U — Botão Inserir Caixa de Texto. Insere TextBox flutuante com
+          borda padrão + parágrafo vazio dentro. Controles de borda/fill/
+          rotação aparecem no overlay quando a caixa é selecionada. */}
+      <InsertTextBoxBtn editor={editor} />
 
       <div className={styles.spacer} />
 
@@ -722,20 +754,19 @@ function ToolBtn({ isActive, onClick, label, children }: ToolBtnProps) {
 }
 
 // ===========================================================================
-// ColorPickerBtn — botão único com popover de cores.
+// ColorPickerBtn — botão de cor que abre o ColorPickerPro como popover.
 //
-// Versão minimalista (sem dependência externa): clica para abrir/fechar uma
-// grade de cores fixas. Pequeno + previsível, e fecha com click-outside.
-// Para cores arbitrárias o caller pode adicionar um `<input type="color">`
-// mais tarde; mantemos a paleta restrita por padrão pericial.
+// O picker completo (S/V pad, hue slider, hex input, paleta de 40, recentes)
+// vive em `ColorPickerPro.tsx`. Este componente só cuida do botão da
+// toolbar + abertura/fechamento do popover com click-outside.
 
 import { useEffect, useRef, useState } from "react";
+import { ColorPickerPro } from "./ColorPickerPro";
 
 interface ColorPickerBtnProps {
   icon: React.ReactNode;
   label: string;
   current?: string | null;
-  palette: ReadonlyArray<{ value: string; label: string }>;
   onSelect: (color: string) => void;
   onClear: () => void;
 }
@@ -744,7 +775,6 @@ function ColorPickerBtn({
   icon,
   label,
   current,
-  palette,
   onSelect,
   onClear,
 }: ColorPickerBtnProps) {
@@ -784,32 +814,17 @@ function ColorPickerBtn({
       </button>
       {open && (
         <div className={styles.colorMenu} role="menu">
-          <div className={styles.colorGrid}>
-            {palette.map((c) => (
-              <button
-                key={c.value}
-                type="button"
-                className={styles.colorChip}
-                style={{ background: c.value }}
-                title={c.label}
-                aria-label={c.label}
-                onClick={() => {
-                  onSelect(c.value);
-                  setOpen(false);
-                }}
-              />
-            ))}
-          </div>
-          <button
-            type="button"
-            className={styles.colorReset}
-            onClick={() => {
+          <ColorPickerPro
+            current={current}
+            onSelect={(hex) => {
+              onSelect(hex);
+              setOpen(false);
+            }}
+            onClear={() => {
               onClear();
               setOpen(false);
             }}
-          >
-            Remover
-          </button>
+          />
         </div>
       )}
     </div>
@@ -933,3 +948,77 @@ const shapeMenuItemStyle: React.CSSProperties = {
   borderRadius: 3,
   textAlign: "left",
 };
+
+/**
+ * U — Botão "Caixa de texto". Insere um TextBox flutuante (in_front)
+ * com border padrão preto-fino e parágrafo vazio dentro. Controles de
+ * border/fill/rotação aparecem no overlay quando a caixa é selecionada.
+ *
+ * Pós-laudo U fix — Insere na posição do CURSOR (não mais hardcoded em
+ * 4cm/4cm). Pega coords screen do caret via `coordsAtPos`, descobre
+ * onde elas caem dentro do offsetParent que vai hospedar a textbox
+ * (mesmo positioned ancestor que o navegador usa pro `position: absolute`)
+ * e converte pra cm.
+ *
+ * Sem dropdown — single button, ação direta. O perito clica, a caixa
+ * aparece próxima ao cursor, ele seleciona e ajusta visualmente.
+ */
+function InsertTextBoxBtn({ editor }: { editor: Editor }) {
+  const handleClick = () => {
+    const PX_PER_CM = 37.7952755906;
+    let wrap_x_cm = 4;
+    let wrap_y_cm = 4;
+
+    try {
+      const view = editor.view;
+      const cursorPos = view.state.selection.from;
+      const cursorCoords = view.coordsAtPos(cursorPos);
+      // O dom do editor (`.ProseMirror`) é o ancestral mais próximo de
+      // qualquer node inserido. Usamos ele como referência pra cm —
+      // alinha bem com onde a textbox vai ser renderizada (offsetParent
+      // do textbox geralmente é o `.ProseMirror` ou um ancestral próximo).
+      const editorDom = view.dom as HTMLElement;
+      const editorRect = editorDom.getBoundingClientRect();
+      const zoom =
+        editorRect.width / Math.max(1, editorDom.offsetWidth || 1);
+      // Posição do cursor relativa ao topo-esq do editorDom, em layout px.
+      const dxPx = (cursorCoords.left - editorRect.left) / Math.max(0.0001, zoom);
+      const dyPx = (cursorCoords.top - editorRect.top) / Math.max(0.0001, zoom);
+      // Pequeno offset pra caixa não ficar exatamente sob o cursor (que
+      // some debaixo dela). Joga 1cm pra baixo do cursor.
+      wrap_x_cm = Math.max(0, dxPx / PX_PER_CM);
+      wrap_y_cm = Math.max(0, dyPx / PX_PER_CM + 0.3);
+    } catch {
+      // Fallback pra posição fixa se coordsAtPos falhar (ex: editor sem
+      // foco). Adiciona jitter pra não empilhar caixas no mesmo ponto.
+      const jitter = Math.random() * 1.5;
+      wrap_x_cm = 4 + jitter;
+      wrap_y_cm = 4 + jitter;
+    }
+
+    editor.commands.insertTextBox({
+      wrap_mode: "in_front",
+      wrap_x_cm,
+      wrap_y_cm,
+      width_cm: 6,
+      height_cm: 2,
+      border_enabled: true,
+      border_color: "#1f2937",
+      border_width: 1,
+      border_style: "solid",
+      fill_enabled: false,
+      fill_color: "#ffffff",
+    });
+  };
+
+  return (
+    <button
+      type="button"
+      className={styles.btnLabel}
+      onClick={handleClick}
+      title="Inserir caixa de texto"
+    >
+      <TextCursorInput size={14} /> Caixa de texto
+    </button>
+  );
+}

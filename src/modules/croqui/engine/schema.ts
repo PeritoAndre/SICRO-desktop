@@ -277,219 +277,21 @@ export interface SicroMeasurementObject extends SicroObjectBase {
 }
 
 // ---------------------------------------------------------------------------
-// MVP 9 — Road Engine Pro
+// Fase S clean cut — A representação de via/rotatória vive AGORA
+// EXCLUSIVAMENTE em `road-parity/`. O Python Parity Engine (4-point
+// Bezier + rotatória circular simples) é o único motor de via.
 //
-// A "road" object is the first-class representation of a street/avenue/
-// highway. Replaces the old approach of stacking three or four `line`
-// objects to fake one. Encodes:
+// Vias parity têm `kind: "road_parity"`; rotatórias parity têm
+// `kind: "roundabout_parity"`. Coexistem no mesmo array `objects`
+// com vehicles/lines/markers/text/measurement.
 //
-//   - geometric centerline (flat `[x1, y1, x2, y2, …]`, mesma convenção
-//     que `SicroLineObject.points`);
-//   - largura total da pista (px);
-//   - número de faixas;
-//   - sentido (mão única / dupla);
-//   - estilo da via (urban / avenue / highway / dirt / parking / custom);
-//   - marcações (eixo central, bordas, divisórias de faixa);
-//   - guia/meio-fio (curb);
-//   - cor de superfície (asphalt fill);
-//   - `spline_tension` para suavização Catmull-Rom-like (0 = retilínea,
-//     0.5 ~ smooth, 1 = muito curvo).
-//
-// O renderer (CanvasStage.RoadNode) usa Konva.Line com `tension` para
-// suavizar a centerline e desenha as marcações em camadas sucessivas.
-// Interseções entre RoadObjects são detectadas em runtime e cobertas
-// por um patch de superfície para não acumular marcações sobrepostas.
+// Os tipos legacy (SicroRoadObject, SicroRoundaboutObject + companhia:
+// RoadSubtype, RoadDirection, RoadStyle, RoadMarkings, RoadCurb,
+// RoadSurface, RoadSmoothing) foram REMOVIDOS na Fase S. O `coerceCroquiDoc`
+// descarta silenciosamente quaisquer objetos `kind: "road"`/"roundabout"
+// que cheguem de croquis pré-S — eles não eram distribuídos pra users.
 
-export type RoadSubtype = "spline" | "polyline" | "intersection" | "osm_way";
-
-export type RoadDirection = "one_way" | "two_way" | "unknown";
-
-export type RoadStyle =
-  | "urban"
-  | "avenue"
-  | "highway"
-  | "dirt"
-  | "parking"
-  | "custom";
-
-export type CenterLineStyle =
-  | "none"
-  | "solid"
-  | "dashed"
-  | "double_solid"
-  | "solid_dashed";
-
-/**
- * Colour scheme for road markings. `auto` keeps the legacy behaviour
- * (yellow on highway/avenue, white otherwise — chosen by the renderer
- * from `road_style`). The explicit `white` / `yellow` values let the
- * perito override per road via the InspectorPanel — useful for
- * municípios where the convention diverges from the renderer default.
- * MVP 10 Round 5.
- */
-export type RoadMarkingColor = "auto" | "white" | "yellow";
-
-export interface RoadMarkings {
-  center_line: CenterLineStyle;
-  edge_line: boolean;
-  lane_dividers: boolean;
-  /** Crosswalk visual rendered at the start of the road (MVP). */
-  crosswalk_start?: boolean;
-  /** Crosswalk visual rendered at the end of the road (MVP). */
-  crosswalk_end?: boolean;
-  /**
-   * Marking colour scheme. Optional + defaults to `"auto"` so legacy
-   * documents keep the same look. MVP 10 Round 5.
-   */
-  color?: RoadMarkingColor;
-}
-
-export interface RoadCurb {
-  enabled: boolean;
-  width: number; // px
-  color: string;
-}
-
-export interface RoadSurface {
-  fill: string;
-  /** Reserved — texture is rendered lazily by the renderer. */
-  texture?: "none" | "subtle_asphalt";
-}
-
-/**
- * Modo de suavização da centerline. Road Engine 2.0 Ciclo 2 v5.
- *
- *   - `"straight"` — sem suavização, polyline crua (vias retas / esquinas
- *     urbanas que devem permanecer angulares);
- *   - `"soft"` — Catmull-Rom com tensão moderada (default — curva suave
- *     respeitando esquinas);
- *   - `"bezier"` — Catmull-Rom com tensão maior + amostragem mais densa
- *     (curvas mais arredondadas);
- *   - `"osm"` — modo otimizado para vias importadas (cardinal spline
- *     suave em sequências longas de pontos).
- *
- * Aditivo / opcional: croquis pré-Ciclo 2 v5 sem o campo continuam
- * carregando; o renderer aplica o default `"soft"`.
- */
-export type RoadSmoothingMode = "straight" | "soft" | "bezier" | "osm";
-
-export interface RoadSmoothing {
-  mode: RoadSmoothingMode;
-  /** Override de tensão (0 = sem curva, 1 = curvatura máxima). Opcional. */
-  tension?: number;
-  /** Preservar quinas agudas (~72°+). Default `true`. */
-  preserve_corners?: boolean;
-}
-
-export interface SicroRoadObject extends SicroObjectBase {
-  kind: "road";
-  subtype: RoadSubtype;
-  /** Flat `[x1,y1,x2,y2,...]` — mesmas convenções que `SicroLineObject.points`. */
-  points: number[];
-  /** Width of the **paved surface** in canvas pixels. */
-  width: number;
-  /** 1+ lanes. The renderer uses this to draw lane dividers. */
-  lane_count: number;
-  /** Optional explicit lane width. When absent, `width / lane_count`. */
-  lane_width?: number;
-  direction: RoadDirection;
-  road_style: RoadStyle;
-  markings: RoadMarkings;
-  curb: RoadCurb;
-  surface: RoadSurface;
-  /** 0 = polyline reta; 0.5 ~ smooth catmull-rom; 1 = muito curvo. */
-  spline_tension: number;
-  /**
-   * Smoothing mode for the centerline (Road Engine 2.0 Ciclo 2 v5).
-   * Aditivo + opcional. Quando ausente, renderer aplica default
-   * `{ mode: "soft", preserve_corners: true }`.
-   */
-  smoothing?: RoadSmoothing;
-  /**
-   * `true` ⇒ this road is a closed loop (rotatória, retorno, anel
-   * fechado). The renderer skips end-caps, treats the polyline as a
-   * closed Konva.Line, and suppresses the centre marking through the
-   * "closing" segment. Optional + defaults to `false`. MVP 10 Round 5.
-   */
-  closed_path?: boolean;
-  /**
-   * Cubic Bezier control points (Road Engine 2.0 Fase G.3 — paridade
-   * Python). Quando presente, o renderer constrói a centerline a
-   * partir de **4 pontos** (start = points[0..1], cx1/cy1 + cx2/cy2,
-   * end = points[last-1..last]). Equivale exatamente ao modelo do
-   * `_via_spline` do SICRO 1.0 Python (`spline_via.py`).
-   *
-   * Aditivo + opcional. Quando ausente, o renderer cai no caminho
-   * polyline + smoothing (Catmull-Rom). Setado pelo OSM Adapter 2.0
-   * para cada via importada, derivado por Hermite→Bezier sobre a
-   * polyline clipada ao raio.
-   */
-  bezier?: {
-    cx1: number;
-    cy1: number;
-    cx2: number;
-    cy2: number;
-  };
-  /** Optional bag of opaque per-object metadata (OSM tags, etc.). */
-  metadata_json?: string;
-}
-
-// ---------------------------------------------------------------------------
-// Road Engine 2.0 — Rotatória primitiva.
-//
-// Em vez de aproximar uma rotatória como um `SicroRoadObject` fechado
-// (polyline com `closed_path: true`), a primitiva dedicada modela-a
-// geometricamente: centro + raio + largura do anel de asfalto. Mirror
-// do que o SICRO 1.0 Python faz em `desenho/osm_via.py:_rotatoria_da_way`.
-//
-// Vantagens vs `closed_path`:
-//   - render trivial (2 `Konva.Circle` concêntricos, sem polígono
-//     amostrado);
-//   - sem serrilhado nas curvas do anel;
-//   - sem possibilidade de "centerline" amarela atravessando a
-//     ilha central;
-//   - fácil de encaixar no junction-mask de Fase F (uma rotatória vira
-//     um disco no contexto).
-//
-// O kind é aditivo. Croquis pré-Ciclo 2 não carregam roundabouts;
-// `coerceCroquiDoc` ignora kinds desconhecidos (legado de MVP 6).
-
-export interface SicroRoundaboutObject extends SicroObjectBase {
-  kind: "roundabout";
-  /** Centro do círculo (px do canvas). */
-  cx: number;
-  cy: number;
-  /**
-   * Raio externo do asfalto (px do canvas). O raio interno (ilha
-   * central) é `r - width`.
-   */
-  r: number;
-  /** Largura do anel de asfalto (px). Resulta em `r_interno = r - width`. */
-  width: number;
-  /**
-   * Número de faixas do anel (Ciclo 2 v6). Aditivo + opcional. Quando
-   * ausente, renderer aplica `1`. Usado pelo Inspector "Recalcular
-   * proporção" para multiplicar a largura do anel.
-   */
-  lane_count?: number;
-  /** Cor + textura do asfalto. Reutiliza `RoadSurface` pra coerência visual. */
-  surface: RoadSurface;
-  /**
-   * Cor da ilha central. Quando ausente, default cinza claro
-   * (não esverdeado — o SICRO 1.0 usa "calçada" na ilha; mantemos
-   * `#e5e7eb` como neutro até o perito customizar).
-   */
-  inner_color?: string;
-  /**
-   * Curb externo opcional — mesma semântica que `SicroRoadObject.curb`.
-   * Quando ausente, sem curb.
-   */
-  curb?: RoadCurb;
-  /** Cor da borda externa do anel. Default `#f5f5f5` (branco). */
-  border_color?: string;
-  /** Bag de metadata opaque (importação OSM no futuro, etc.). */
-  metadata_json?: string;
-}
+import type { SicroParityObject } from "./road-parity/types";
 
 export type SicroObject =
   | SicroVehicleObject
@@ -497,17 +299,7 @@ export type SicroObject =
   | SicroMarkerObject
   | SicroTextObject
   | SicroMeasurementObject
-  // MVP 9
-  | SicroRoadObject
-  // Road Engine 2.0 Ciclo 2
-  | SicroRoundaboutObject;
-
-// NOTA Fase H — os tipos `SicroRoadObject_parity` e
-// `SicroRoundaboutObject_parity` (em `road-parity/types.ts`)
-// **NÃO** participam desta união. Eles vivem em um array separado
-// `SicroCroquiDoc.parity_objects?: SicroParityObject[]`, isolando o
-// motor parity do código legado. Mantém narrowing de `SicroObject`
-// intacto durante a coexistência.
+  | SicroParityObject;
 
 // ---------------------------------------------------------------------------
 // MVP 9 — view / export / stamp settings (all optional + additive)
@@ -582,31 +374,6 @@ export interface SicroOsmImportSession {
 
 // ---- Envelope ----
 
-/**
- * Road Engine version flag — additive, optional, defaults to `"v1"`.
- *
- * Introduced in Road Engine 2.0 cycle 1 to let `v1` (stroke-based) and
- * `v2` (ribbon-polygon mesh) coexist during the migration. The renderer
- * branches on this value: any envelope that doesn't carry the field
- * (every croqui created before Road Engine 2.0) renders with v1, so
- * pre-existing documents continue to look identical until the perito
- * explicitly opts into v2 per croqui.
- */
-/**
- * Fase H — `"parity"` adicionado (aditivo). Cada motor renderiza
- * um SUBCONJUNTO dos objetos:
- *
- *   - `"v1"` / `"v2"`: renderizam `SicroRoadObject` / `SicroRoundaboutObject`
- *     legados.
- *   - `"parity"`: renderiza `SicroRoadObject_parity` / `SicroRoundaboutObject_parity`
- *     (Python Parity Engine).
- *
- * Documentos com `road_engine_version: "parity"` esperam objetos
- * parity em `doc.objects`. A migração (Fase H.4) converte legados
- * em parity quando o usuário aceita.
- */
-export type RoadEngineVersion = "v1" | "v2" | "parity";
-
 export interface SicroCroquiDoc {
   schema_version: string;
   croqui_id: string;
@@ -625,20 +392,4 @@ export interface SicroCroquiDoc {
   stamp_metadata?: SicroCroquiStampMetadata;
   // MVP 10 — OSM imports (aditivo, opcional)
   osm_imports?: SicroOsmImportSession[];
-  // Road Engine 2.0 — feature flag (aditivo, opcional, default "v1")
-  road_engine_version?: RoadEngineVersion;
-  /**
-   * Fase H — Python Parity Engine.
-   *
-   * Objetos parity (via Bezier 4-point + rotatória simplificada)
-   * vivem em array separado de `objects` para evitar colisão de
-   * tipos. Quando `road_engine_version === "parity"`, o renderer usa
-   * `parity_objects` e ignora `objects` (que continua existindo
-   * para preservar dados legados durante a migração).
-   *
-   * Opcional e aditivo — documentos pré-Fase H não têm este campo.
-   * Documentos parity-only podem ter `objects: []` + `parity_objects`
-   * populado.
-   */
-  parity_objects?: import("./road-parity/types").SicroParityObject[];
 }

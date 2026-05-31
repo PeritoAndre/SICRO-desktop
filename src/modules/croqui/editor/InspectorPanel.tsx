@@ -34,20 +34,28 @@ import {
   formatMeasurement,
   inferCategory,
   type ObjectCategory,
-  type RoadMarkingColor,
-  type RoadSmoothingMode,
   type SicroCroquiLayer,
   type SicroCroquiScale,
   type SicroLineObject,
   type SicroMarkerObject,
   type SicroMeasurementObject,
   type SicroObject,
-  type SicroRoadObject,
-  type SicroRoundaboutObject,
   type SicroTextObject,
   type SicroVehicleObject,
   type VehicleBodyType,
 } from "../engine";
+import {
+  PARITY_ROAD_LARGURA_MAX_M,
+  PARITY_ROAD_LARGURA_MIN_M,
+  PARITY_ROUNDABOUT_LARGURA_MAX_M_FALLBACK,
+  PARITY_ROUNDABOUT_LARGURA_MIN_M,
+  PARITY_ROUNDABOUT_R_MAX_M,
+  PARITY_ROUNDABOUT_R_MIN_M,
+  type ParityMarcacao,
+  type ParitySuperficie,
+  type SicroRoadObject_parity,
+  type SicroRoundaboutObject_parity,
+} from "../engine/road-parity";
 import styles from "./InspectorPanel.module.css";
 
 interface Props {
@@ -60,14 +68,6 @@ interface Props {
   onUpdateObject: (id: string, patch: Partial<SicroObject>) => void;
   onDeleteObject: (id: string) => void;
   onMoveObject: (id: string, direction: "up" | "down") => void;
-  /**
-   * Ciclo 2 v6 — botão "Recalcular proporção" da rotatória.
-   * Pai resolve `doc.objects`, encontra vias conectadas pelo endpoint
-   * próximo do anel, calcula `computeAutoDimensions` e atualiza o
-   * objeto via `onUpdateObject`. Opcional — quando ausente, o botão
-   * fica oculto.
-   */
-  onRecalcRoundaboutProportion?: (roundaboutId: string) => void;
 }
 
 const CATEGORY_ORDER: ObjectCategory[] = [
@@ -102,7 +102,6 @@ export function InspectorPanel({
   onUpdateObject,
   onDeleteObject,
   onMoveObject,
-  onRecalcRoundaboutProportion,
 }: Props) {
   const selected = selectedId
     ? objects.find((o) => o.id === selectedId) ?? null
@@ -174,9 +173,6 @@ export function InspectorPanel({
             object={selected}
             scale={scale}
             onChange={(patch) => onUpdateObject(selected.id, patch)}
-            {...(onRecalcRoundaboutProportion
-              ? { onRecalcRoundaboutProportion }
-              : {})}
           />
         )}
       </section>
@@ -400,10 +396,12 @@ function shortKind(o: SicroObject): string {
       return "T";
     case "measurement":
       return "↔";
-    case "road":
+    case "road_parity":
       return "R";
-    case "roundabout":
+    case "roundabout_parity":
       return "◯";
+    default:
+      return "?";
   }
 }
 
@@ -420,10 +418,12 @@ function summariseObject(o: SicroObject): string {
       return o.text.slice(0, 32);
     case "measurement":
       return "Medição";
-    case "road":
-      return `Via ${o.subtype} (${o.lane_count} faixa(s))`;
-    case "roundabout":
-      return `Rotatória (r=${o.r.toFixed(0)}, w=${o.width.toFixed(0)})`;
+    case "road_parity":
+      return "Via (parity)";
+    case "roundabout_parity":
+      return "Rotatória (parity)";
+    default:
+      return "Objeto";
   }
 }
 
@@ -431,14 +431,21 @@ function ObjectProperties({
   object,
   scale,
   onChange,
-  onRecalcRoundaboutProportion,
 }: {
   object: SicroObject;
   scale: SicroCroquiScale | null;
   onChange: (patch: Partial<SicroObject>) => void;
-  /** Ciclo 2 v6 — only used when object.kind === "roundabout". */
-  onRecalcRoundaboutProportion?: (id: string) => void;
 }) {
+  // Fase S — vias/rotatórias parity têm seu próprio shape (largura em
+  // metros, marcação, anchors Bezier) e ainda não têm editor dedicado
+  // no Inspector. Por enquanto, mostramos só os campos comuns + um
+  // aviso de que a edição é via canvas.
+  const isParity =
+    object.kind === "road_parity" || object.kind === "roundabout_parity";
+  // `color` / `notes` só existem nos kinds legados (vehicle/line/marker/
+  // text/measurement). Tipamos via cast para acesso uniforme.
+  const colorish = object as { color?: string | null; notes?: string | null };
+
   return (
     <div className={styles.props}>
       <Field label="ID" value={object.id} mono readOnly />
@@ -468,32 +475,28 @@ function ObjectProperties({
       {object.kind === "measurement" && (
         <MeasurementProps object={object} scale={scale} onChange={onChange} />
       )}
-      {object.kind === "road" && (
-        <RoadProps object={object} onChange={onChange} />
+      {object.kind === "road_parity" && (
+        <ParityRoadProps object={object} onChange={onChange} />
       )}
-      {object.kind === "roundabout" && (
-        <RoundaboutProps
-          object={object}
-          onChange={onChange}
-          onRecalcProportion={
-            onRecalcRoundaboutProportion
-              ? () => onRecalcRoundaboutProportion(object.id)
-              : undefined
-          }
-        />
+      {object.kind === "roundabout_parity" && (
+        <ParityRoundaboutProps object={object} onChange={onChange} />
       )}
 
-      <Field
-        label="Cor"
-        type="color"
-        value={object.color ?? "#000000"}
-        onChange={(v) => onChange({ color: v } as Partial<SicroObject>)}
-      />
-      <Field
-        label="Observação"
-        value={object.notes ?? ""}
-        onChange={(v) => onChange({ notes: v } as Partial<SicroObject>)}
-      />
+      {!isParity && (
+        <>
+          <Field
+            label="Cor"
+            type="color"
+            value={colorish.color ?? "#000000"}
+            onChange={(v) => onChange({ color: v } as Partial<SicroObject>)}
+          />
+          <Field
+            label="Observação"
+            value={colorish.notes ?? ""}
+            onChange={(v) => onChange({ notes: v } as Partial<SicroObject>)}
+          />
+        </>
+      )}
       <CheckboxRow
         label="Visível"
         checked={object.visible !== false}
@@ -642,93 +645,94 @@ function MeasurementProps({
   );
 }
 
-/**
- * Road properties — exposes the per-road overrides the perito needs
- * day-to-day. Width / lane count / curb / surface stay implicit (they
- * come from `road_style`); what we surface here are the discretionary
- * fields:
- *
- *   - Cor da marcação (auto / branca / amarela) — Brazilian roads
- *     mix conventions per municipality; manual override matters.
- *   - Caminho fechado — confirms a rotatória / retorno without
- *     forcing the perito to re-mark via OSM.
- */
-function RoadProps({
+// ---------------------------------------------------------------------------
+// Fase S — Editores parity (largura em metros, marcação, superfície).
+
+function ParityRoadProps({
   object,
   onChange,
 }: {
-  object: SicroRoadObject;
+  object: SicroRoadObject_parity;
   onChange: (patch: Partial<SicroObject>) => void;
 }) {
-  const markingColor: RoadMarkingColor =
-    object.markings.color ?? "auto";
+  // Estilo do eixo central — combina `marcacao` + `mao_dupla` num único
+  // select. Antes eram dois controles separados: o user podia escolher
+  // "branca" mas o eixo não renderizava porque a via estava marcada
+  // como mão única (`mao_dupla=false`). UX confusa, especialmente em
+  // vias importadas do OSM com `oneway=yes`.
+  const eixoStyle = !object.mao_dupla
+    ? "mao_unica"
+    : object.marcacao === "amarela"
+      ? "dupla_amarela"
+      : object.marcacao === "branca"
+        ? "dupla_branca"
+        : "dupla_sem_eixo";
+
+  const applyEixoStyle = (style: string) => {
+    switch (style) {
+      case "dupla_amarela":
+        onChange({
+          mao_dupla: true,
+          marcacao: "amarela" as ParityMarcacao,
+        } as Partial<SicroObject>);
+        break;
+      case "dupla_branca":
+        onChange({
+          mao_dupla: true,
+          marcacao: "branca" as ParityMarcacao,
+        } as Partial<SicroObject>);
+        break;
+      case "dupla_sem_eixo":
+        onChange({
+          mao_dupla: true,
+          marcacao: "nenhuma" as ParityMarcacao,
+        } as Partial<SicroObject>);
+        break;
+      case "mao_unica":
+        onChange({
+          mao_dupla: false,
+          marcacao: "nenhuma" as ParityMarcacao,
+        } as Partial<SicroObject>);
+        break;
+    }
+  };
+
   return (
     <>
-      <Field label="Estilo" value={object.road_style} readOnly />
       <NumberField
-        label="Faixas"
-        value={object.lane_count}
-        onChange={(n) =>
-          onChange({
-            lane_count: Math.max(1, Math.min(12, Math.round(n))),
-          } as Partial<SicroObject>)
-        }
+        label="Largura (m)"
+        value={object.largura_m}
+        step={0.5}
+        onChange={(n) => {
+          const clamped = Math.min(
+            Math.max(n, PARITY_ROAD_LARGURA_MIN_M),
+            PARITY_ROAD_LARGURA_MAX_M,
+          );
+          onChange({ largura_m: clamped } as Partial<SicroObject>);
+        }}
       />
-      <label className={styles.fieldRow}>
-        <span className={styles.fieldLabel}>Cor da marcação</span>
-        <select
-          value={markingColor}
-          onChange={(e) => {
-            const v = e.target.value as RoadMarkingColor;
-            onChange({
-              markings: { ...object.markings, color: v },
-            } as Partial<SicroObject>);
-          }}
-          className={styles.fieldInput}
-        >
-          <option value="auto">Automático (por estilo)</option>
-          <option value="white">Branca</option>
-          <option value="yellow">Amarela</option>
-        </select>
-      </label>
-      <CheckboxRow
-        label="Caminho fechado (rotatória/retorno)"
-        checked={object.closed_path === true}
-        onChange={(v) =>
-          onChange({ closed_path: v } as Partial<SicroObject>)
-        }
+      <SelectField
+        label="Eixo central"
+        value={eixoStyle}
+        options={[
+          { v: "dupla_amarela", l: "Mão dupla — amarela" },
+          { v: "dupla_branca", l: "Mão dupla — branca" },
+          { v: "dupla_sem_eixo", l: "Mão dupla — sem eixo" },
+          { v: "mao_unica", l: "Mão única (sem eixo)" },
+        ]}
+        onChange={applyEixoStyle}
       />
-      {/* Road Engine 2.0 Ciclo 2 v5 — suavização da centerline.
-          Reta = polyline crua; Suave (default) = Catmull-Rom moderado
-          preservando esquinas; Curva/Bezier = Catmull-Rom denso; OSM
-          = preset para vias importadas. */}
-      <label className={styles.fieldRow}>
-        <span className={styles.fieldLabel}>Suavização</span>
-        <select
-          value={object.smoothing?.mode ?? "soft"}
-          onChange={(e) => {
-            const mode = e.target.value as RoadSmoothingMode;
-            onChange({
-              smoothing: { ...(object.smoothing ?? {}), mode },
-            } as Partial<SicroObject>);
-          }}
-          className={styles.fieldInput}
-        >
-          <option value="straight">Reta (polyline)</option>
-          <option value="soft">Suave (default)</option>
-          <option value="bezier">Curva / Bezier</option>
-          <option value="osm">OSM (curva ampla)</option>
-        </select>
-      </label>
-      <CheckboxRow
-        label="Preservar esquinas (não suavizar quinas ≥ 72°)"
-        checked={object.smoothing?.preserve_corners !== false}
+      <SelectField
+        label="Superfície"
+        value={object.superficie}
+        options={[
+          { v: "asfalto", l: "Asfalto" },
+          { v: "calcada", l: "Calçada" },
+          { v: "terra", l: "Terra" },
+        ]}
         onChange={(v) =>
           onChange({
-            smoothing: {
-              ...(object.smoothing ?? { mode: "soft" }),
-              preserve_corners: v,
-            },
+            superficie: v as ParitySuperficie,
           } as Partial<SicroObject>)
         }
       />
@@ -736,112 +740,79 @@ function RoadProps({
   );
 }
 
-function RoundaboutProps({
+function ParityRoundaboutProps({
   object,
   onChange,
-  onRecalcProportion,
 }: {
-  object: SicroRoundaboutObject;
+  object: SicroRoundaboutObject_parity;
   onChange: (patch: Partial<SicroObject>) => void;
-  /**
-   * Ciclo 2 v6 — "Recalcular proporção": pai resolve as vias
-   * conectadas + chama `computeAutoDimensions` + atualiza o objeto.
-   * Quando ausente, o botão fica escondido.
-   */
-  onRecalcProportion?: () => void;
 }) {
-  // Road Engine 2.0 Ciclo 2 v6 — Inspector da rotatória redesenhado.
-  // Em vez de apenas raio e largura soltos, o perito agora vê:
-  //   - posição (cx/cy)
-  //   - raio externo + largura do anel + raio da ilha (informativo)
-  //   - quantidade de faixas do anel
-  //   - cores
-  //   - botão "Recalcular proporção" que re-dimensiona com base nas
-  //     vias conectadas
-  const innerRadius = Math.max(0, object.r - object.width);
   return (
     <>
       <NumberField
-        label="Centro X"
-        value={object.cx}
-        onChange={(n) => onChange({ cx: n } as Partial<SicroObject>)}
-      />
-      <NumberField
-        label="Centro Y"
-        value={object.cy}
-        onChange={(n) => onChange({ cy: n } as Partial<SicroObject>)}
-      />
-      <NumberField
-        label="Raio externo"
-        value={object.r}
+        label="Raio externo (m)"
+        value={object.r_m}
+        step={1}
         onChange={(n) => {
-          const r = Math.max(object.width + 4, n);
-          onChange({ r } as Partial<SicroObject>);
+          const clamped = Math.min(
+            Math.max(n, PARITY_ROUNDABOUT_R_MIN_M),
+            PARITY_ROUNDABOUT_R_MAX_M,
+          );
+          onChange({ r_m: clamped } as Partial<SicroObject>);
         }}
       />
       <NumberField
-        label="Largura do anel"
-        value={object.width}
+        label="Largura do anel (m)"
+        value={object.largura_m}
+        step={0.5}
         onChange={(n) => {
-          const width = Math.max(2, Math.min(object.r - 4, n));
-          onChange({ width } as Partial<SicroObject>);
+          // Anel não pode engolir a ilha — deixa pelo menos 1m de
+          // ilha visível, e respeita o teto global.
+          const ceil = Math.min(
+            PARITY_ROUNDABOUT_LARGURA_MAX_M_FALLBACK,
+            Math.max(PARITY_ROUNDABOUT_LARGURA_MIN_M, object.r_m - 1),
+          );
+          const clamped = Math.min(
+            Math.max(n, PARITY_ROUNDABOUT_LARGURA_MIN_M),
+            ceil,
+          );
+          onChange({ largura_m: clamped } as Partial<SicroObject>);
         }}
       />
-      <Field label="Raio da ilha" value={innerRadius.toFixed(0)} readOnly />
-      <NumberField
-        label="Faixas do anel"
-        value={object.lane_count ?? 1}
-        onChange={(n) =>
-          onChange({
-            lane_count: Math.max(1, Math.min(4, Math.round(n))),
-          } as Partial<SicroObject>)
-        }
-      />
-      <Field
-        label="Asfalto (fill)"
-        type="color"
-        value={object.surface.fill}
+      <SelectField
+        label="Superfície"
+        value={object.superficie}
+        options={[
+          { v: "asfalto", l: "Asfalto" },
+          { v: "calcada", l: "Calçada" },
+          { v: "terra", l: "Terra" },
+        ]}
         onChange={(v) =>
           onChange({
-            surface: { ...object.surface, fill: v },
+            superficie: v as ParitySuperficie,
           } as Partial<SicroObject>)
         }
       />
       <Field
-        label="Ilha central"
+        label="Cor da ilha"
         type="color"
-        value={object.inner_color ?? "#e5e7eb"}
+        value={object.inner_color ?? "#3A6535"}
         onChange={(v) =>
           onChange({ inner_color: v } as Partial<SicroObject>)
         }
       />
-      <Field
-        label="Borda"
-        type="color"
-        value={object.border_color ?? "#f5f5f5"}
+      <SelectField
+        label="Eixo central do anel"
+        value={object.marcacao ?? "nenhuma"}
+        options={[
+          { v: "nenhuma", l: "Sem eixo (default)" },
+          { v: "amarela", l: "Tracejado amarelo" },
+          { v: "branca", l: "Tracejado branco" },
+        ]}
         onChange={(v) =>
-          onChange({ border_color: v } as Partial<SicroObject>)
+          onChange({ marcacao: v as ParityMarcacao } as Partial<SicroObject>)
         }
       />
-      {onRecalcProportion && (
-        <button
-          type="button"
-          onClick={onRecalcProportion}
-          style={{
-            marginTop: 6,
-            padding: "6px 10px",
-            fontSize: 12,
-            border: "1px solid #94a3b8",
-            background: "#f1f5f9",
-            color: "#334155",
-            borderRadius: 4,
-            cursor: "pointer",
-          }}
-          title="Re-dimensiona a rotatória proporcionalmente às vias que terminam no anel"
-        >
-          Recalcular proporção
-        </button>
-      )}
     </>
   );
 }
@@ -929,16 +900,19 @@ function NumberField({
   label,
   value,
   onChange,
+  step,
 }: {
   label: string;
   value: number;
   onChange: (n: number) => void;
+  step?: number;
 }) {
   return (
     <label className={styles.field}>
       <span className={styles.fieldLabel}>{label}</span>
       <input
         type="number"
+        step={step ?? 1}
         value={Number.isFinite(value) ? value : 0}
         onChange={(e) => {
           const n = Number(e.target.value.replace(",", "."));

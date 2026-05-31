@@ -67,6 +67,17 @@ pub fn touch_updated_at(conn: &Connection, id: &Uuid, when: DateTime<Utc>) -> Re
     Ok(())
 }
 
+/// Remove a linha do laudo da tabela. NÃO mexe no `.sicrodoc` em disco —
+/// quem orquestra a exclusão (apagar arquivo + auditoria) é o command em
+/// `commands/laudo_commands.rs`.
+pub fn delete(conn: &Connection, id: &Uuid) -> Result<()> {
+    conn.execute(
+        "DELETE FROM laudos WHERE id = ?1",
+        [id.to_string()],
+    )?;
+    Ok(())
+}
+
 fn row_to_laudo(row: &Row<'_>) -> rusqlite::Result<Laudo> {
     let id_str: String = row.get("id")?;
     let id = Uuid::parse_str(&id_str)

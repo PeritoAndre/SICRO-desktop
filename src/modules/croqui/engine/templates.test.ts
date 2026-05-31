@@ -1,5 +1,9 @@
 /**
  * Unit tests for road templates — MVP 6.
+ *
+ * Fase S clean cut — Os templates `via_pro_*` (que dependiam de
+ * `makeRoad` + `SicroRoadObject` v1) foram removidos. Os templates
+ * remanescentes são todos line-based (emitem `SicroLineObject`).
  */
 
 import { describe, expect, it } from "vitest";
@@ -31,7 +35,7 @@ describe("TEMPLATES registry", () => {
   });
 
   it.each(Object.keys(TEMPLATES) as TemplateId[])(
-    "%s — produces editable objects (line or road), none at id-collision",
+    "%s — produces editable line objects, no id-collision",
     (id) => {
       const tpl = findTemplate(id)!;
       const objs = tpl.build({ x: 200, y: 200 });
@@ -39,10 +43,10 @@ describe("TEMPLATES registry", () => {
       const ids = new Set(objs.map((o) => o.id));
       expect(ids.size).toBe(objs.length);
       for (const o of objs) {
-        // MVP 9 Road Engine Pro: templates can emit either `line`
-        // (legacy line-based templates) or `road` (new RoadObject-based
-        // templates). Both are valid; everything else is a bug.
-        expect(["line", "road"]).toContain(o.kind);
+        // Fase S — templates emitem apenas `line` (line-based).
+        // Vias parity são criadas pela ferramenta Criar Via, não por
+        // templates.
+        expect(o.kind).toBe("line");
         expect(o.category).toBeDefined();
       }
     },
@@ -83,45 +87,28 @@ describe("findTemplate", () => {
   });
 });
 
-describe("TOOLBAR_TEMPLATES (Round 3 — Road Engine only)", () => {
-  it("contains only via_pro_* ids", () => {
-    for (const id of TOOLBAR_TEMPLATES) {
-      expect(id.startsWith("via_pro_")).toBe(true);
-    }
-  });
-
+describe("TOOLBAR_TEMPLATES (Fase S — line-based only)", () => {
   it("every entry resolves through findTemplate", () => {
     for (const id of TOOLBAR_TEMPLATES) {
       expect(findTemplate(id)).toBeDefined();
     }
   });
 
-  it("every TOOLBAR_TEMPLATES entry emits only RoadObject(s)", () => {
+  it("every TOOLBAR_TEMPLATES entry emits only line objects", () => {
     for (const id of TOOLBAR_TEMPLATES) {
       const tpl = findTemplate(id);
       expect(tpl).toBeDefined();
       const objs = tpl!.build({ x: 100, y: 100 });
       expect(objs.length).toBeGreaterThan(0);
       for (const o of objs) {
-        expect(o.kind).toBe("road");
+        expect(o.kind).toBe("line");
       }
     }
   });
 
-  it("legacy line-based templates remain available via findTemplate for compat", () => {
-    // The old templates aren't surfaced by the toolbar (TOOLBAR_TEMPLATES
-    // doesn't list them), but they MUST stay resolvable so any code path
-    // that still references them (e.g. older keyboard shortcuts, deep
-    // links) keeps working.
-    for (const id of ["via_reta", "cruzamento_x", "mao_dupla", "mao_unica"]) {
-      expect(findTemplate(id as TemplateId)).toBeDefined();
-    }
-  });
-
-  it("the line-based templates are hidden from the toolbar list", () => {
-    expect(TOOLBAR_TEMPLATES).not.toContain("via_reta");
-    expect(TOOLBAR_TEMPLATES).not.toContain("cruzamento_x");
-    expect(TOOLBAR_TEMPLATES).not.toContain("mao_dupla");
-    expect(TOOLBAR_TEMPLATES).not.toContain("avenida_canteiro");
+  it("contains the staple presets (via_reta, cruzamento_x, etc.)", () => {
+    expect(TOOLBAR_TEMPLATES).toContain("via_reta");
+    expect(TOOLBAR_TEMPLATES).toContain("cruzamento_x");
+    expect(TOOLBAR_TEMPLATES).toContain("rotatoria_simples");
   });
 });

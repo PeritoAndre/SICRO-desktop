@@ -30,12 +30,6 @@ const ImagemModule = lazy(() =>
     default: m.ImagemModule,
   })),
 );
-const RoadRenderLabApp = lazy(() =>
-  import("@modules/croqui/spikes/road-render-lab/LabApp").then((m) => ({
-    default: m.RoadRenderLabApp,
-  })),
-);
-
 /** Spinner mínimo enquanto chunks carregam. */
 function ModuleLoading() {
   return (
@@ -55,21 +49,6 @@ function ModuleLoading() {
 }
 
 export function App() {
-  // Fase H spike — acesso isolado ao Road Render Lab via URL hash.
-  // Use `http://localhost:1420/#spike=road-render-lab` para acessar.
-  // Zero impacto no app real: o lab renderiza no lugar de tudo.
-  if (
-    typeof window !== "undefined" &&
-    window.location.hash.includes("spike=road-render-lab")
-  ) {
-    return (
-      <Suspense fallback={<ModuleLoading />}>
-        <RoadRenderLabApp />
-        <Toaster />
-      </Suspense>
-    );
-  }
-
   return (
     <WorkspaceProvider>
       <Toaster />

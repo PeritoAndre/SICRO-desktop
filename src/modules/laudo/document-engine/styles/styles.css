@@ -303,6 +303,22 @@ figure[data-sicro-figure] figcaption {
   margin-top: 4px;
 }
 
+/* Pós-laudo T — Quando a legenda é apagada, o `<figcaption>` continua
+ * existindo (PM exige content="inline*") mas o user quer a foto colada
+ * no próximo texto, sem o espaço fantasma. Colapsa a figcaption se:
+ *   - `:empty` (truly empty)
+ *   - contém só o `<br class="ProseMirror-trailingBreak">` que o PM
+ *     insere pra inline contents sem texto
+ *   - é só whitespace ou só um <br>
+ * `:has()` é suportado em WebView2/Edge moderno (Chromium 105+). */
+figure[data-sicro-figure] figcaption:empty,
+figure[data-sicro-figure] figcaption:has(> br:only-child) {
+  display: none;
+  margin: 0;
+  padding: 0;
+  line-height: 0;
+}
+
 /* ===========================================================================
  * F12.1 — Auto-numeração visual.
  *

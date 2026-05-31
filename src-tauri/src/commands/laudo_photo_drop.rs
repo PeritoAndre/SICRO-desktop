@@ -1,10 +1,17 @@
 //! O — Drag & drop de fotos no editor de laudo.
+//! T — Paste (Ctrl+V) de fotos no editor de laudo (reusa o mesmo pipeline).
 //!
-//! Command que recebe paths de arquivos do drop event do Tauri
-//! (`onDragDropEvent`), filtra extensões de imagem, copia para
-//! `<workspace>/laudos/<laudo_id>/evidencias/photos/`, calcula hash
-//! SHA-256, lê dimensões e EXIF, e devolve metadata pronta pro
-//! frontend inserir como `figure` node no TipTap.
+//! Dois entry points:
+//!   - `import_dragged_photos_to_laudo`  — recebe paths de arquivo (drop ou
+//!     copy de Explorer chegando como path no drag).
+//!   - `import_pasted_photos_to_laudo`   — recebe bytes (base64) + filename
+//!     pra cobrir Ctrl+C/Ctrl+V (bitmap do clipboard ou arquivos copiados
+//!     do Explorer entregues como `File` pelo DataTransfer).
+//!
+//! Ambos compartilham `import_one_photo_bytes` que faz: filtra extensão,
+//! escreve em `<workspace>/laudos/<laudo_id>/evidencias/photos/`, calcula
+//! hash SHA-256, lê dimensões + EXIF, escreve sidecar JSON, e devolve
+//! metadata pro frontend inserir como `figure` node no TipTap.
 //!
 //! Estrutura da pasta destino:
 //!
@@ -16,15 +23,16 @@
 //! ```
 //!
 //! Os 12 primeiros chars do SHA-256 como prefixo garantem unicidade
-//! mesmo se o user dropar dois arquivos com o mesmo nome de pastas
+//! mesmo se o user importar dois arquivos com o mesmo nome de pastas
 //! diferentes.
 //!
-//! O command é IDEMPOTENTE: se o user dropar a mesma foto duas vezes
+//! Os commands são IDEMPOTENTES: se o user importar a mesma foto duas vezes
 //! (mesmo conteúdo, mesmo nome), o destino é igual (mesmo hash) e o
 //! `atomic_write_bytes` simplesmente sobrescreve com bytes idênticos.
 
 use std::path::PathBuf;
 
+use base64::Engine;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -130,8 +138,42 @@ fn import_one_photo(
             src.display()
         )));
     }
+    let original_filename = src
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("foto")
+        .to_string();
+    // Lê os bytes uma única vez e delega pro core. Assim a versão
+    // path-based e a versão paste-based compartilham 100% do pipeline
+    // de hash/escrita/sidecar.
+    let bytes = std::fs::read(&src).map_err(|e| {
+        SicroError::Filesystem(format!("não consegui ler {}: {e}", src.display()))
+    })?;
+    import_one_photo_bytes(ws, laudo_id, &bytes, &original_filename, path_str)
+}
 
-    let extension = src
+/// Core compartilhado entre drag (path) e paste (bytes). Extrai extensão
+/// + basename do `original_filename`, valida a extensão, hash-escreve o
+/// binário, gera o sidecar JSON e devolve a metadata.
+///
+/// `source_descriptor` vai no sidecar como `source_path_at_import` —
+/// pode ser um path real (drag) ou um descritor abstrato (`<clipboard>`,
+/// `<clipboard:image/png>`, etc.) pra paste.
+fn import_one_photo_bytes(
+    ws: &std::path::Path,
+    laudo_id: &str,
+    bytes: &[u8],
+    original_filename: &str,
+    source_descriptor: &str,
+) -> Result<ImportedPhoto> {
+    if bytes.is_empty() {
+        return Err(SicroError::Validation(
+            "arquivo vazio (0 bytes)".to_string(),
+        ));
+    }
+
+    let stem_path = std::path::Path::new(original_filename);
+    let extension = stem_path
         .extension()
         .and_then(|s| s.to_str())
         .map(|s| s.to_ascii_lowercase())
@@ -143,24 +185,14 @@ fn import_one_photo(
         )));
     }
 
-    let original_filename = src
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("foto")
-        .to_string();
-    let basename = src
+    let basename = stem_path
         .file_stem()
         .and_then(|s| s.to_str())
         .map(sanitize_slug)
         .unwrap_or_else(|| "foto".into());
 
-    // Lê os bytes uma única vez e computa o hash diretamente — assim
-    // não temos race entre "calcular hash do dst" e "escrever dst".
-    let bytes = std::fs::read(&src).map_err(|e| {
-        SicroError::Filesystem(format!("não consegui ler {}: {e}", src.display()))
-    })?;
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    hasher.update(bytes);
     let hash_hex = format!("{:x}", hasher.finalize());
     let hash_short = &hash_hex[..12];
 
@@ -179,7 +211,7 @@ fn import_one_photo(
             SicroError::Filesystem(format!("não consegui criar diretório: {e}"))
         })?;
     }
-    atomic_write_bytes(&abs_dest, &bytes)?;
+    atomic_write_bytes(&abs_dest, bytes)?;
 
     // Reusa a função do MVP 7 pra extrair dimensões + mime + EXIF.
     let meta = metadata::read_metadata(&abs_dest, false)?;
@@ -197,7 +229,7 @@ fn import_one_photo(
         "schema_version": "1.0.0",
         "imported_at": Utc::now().to_rfc3339(),
         "source_filename": original_filename,
-        "source_path_at_import": path_str,
+        "source_path_at_import": source_descriptor,
         "sha256": hash_hex,
         "size_bytes": meta.size_bytes,
         "mime": mime,
@@ -217,7 +249,7 @@ fn import_one_photo(
 
     Ok(ImportedPhoto {
         relative_path: rel_dest,
-        original_filename,
+        original_filename: original_filename.to_string(),
         size_bytes: meta.size_bytes,
         sha256: hash_hex,
         width: meta.width,
@@ -226,6 +258,69 @@ fn import_one_photo(
         exif_json,
         date_taken,
     })
+}
+
+/// T — Foto colada do clipboard. Bytes vêm em base64 (single round-trip
+/// JSON-friendly via Tauri invoke). `filename` é uma sugestão do frontend
+/// — pra screenshots ele inventa `pasted-<timestamp>.png`; pra arquivos
+/// copiados do Explorer entregues como `File`, usa o nome original.
+#[derive(Debug, Deserialize)]
+pub struct PastedPhotoInput {
+    pub bytes_base64: String,
+    pub filename: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ImportPastedPhotosInput {
+    pub workspace_path: String,
+    pub laudo_id: String,
+    pub photos: Vec<PastedPhotoInput>,
+}
+
+#[tauri::command]
+pub async fn import_pasted_photos_to_laudo(
+    input: ImportPastedPhotosInput,
+) -> Result<PhotoImportResult> {
+    let ws = PathBuf::from(&input.workspace_path);
+    if !ws.is_dir() {
+        return Err(SicroError::Filesystem(format!(
+            "workspace inválido: {}",
+            ws.display()
+        )));
+    }
+
+    let mut imported = Vec::new();
+    let mut errors = Vec::new();
+
+    for photo in &input.photos {
+        let bytes = match base64::engine::general_purpose::STANDARD
+            .decode(&photo.bytes_base64)
+        {
+            Ok(b) => b,
+            Err(e) => {
+                errors.push(PhotoImportError {
+                    source_path: photo.filename.clone(),
+                    reason: format!("base64 inválido: {e}"),
+                });
+                continue;
+            }
+        };
+        match import_one_photo_bytes(
+            &ws,
+            &input.laudo_id,
+            &bytes,
+            &photo.filename,
+            "<clipboard>",
+        ) {
+            Ok(p) => imported.push(p),
+            Err(e) => errors.push(PhotoImportError {
+                source_path: photo.filename.clone(),
+                reason: format!("{e}"),
+            }),
+        }
+    }
+
+    Ok(PhotoImportResult { imported, errors })
 }
 
 /// Best-effort: lê uma chave de "data de captura" do JSON cru de EXIF.

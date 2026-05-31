@@ -322,7 +322,7 @@ export function coerceSicroDoc(raw: unknown): SicroDoc {
     occurrence_id: obj.occurrence_id,
     type: "laudo",
     title: (obj.title as string) ?? "Laudo sem título",
-    template_id: (obj.template_id as string) ?? "documento_livre",
+    template_id: (obj.template_id as string) ?? "documento_em_branco",
     created_at: (obj.created_at as string) ?? new Date().toISOString(),
     updated_at: (obj.updated_at as string) ?? new Date().toISOString(),
     metadata: (obj.metadata as SicroDocMetadata) ?? {},

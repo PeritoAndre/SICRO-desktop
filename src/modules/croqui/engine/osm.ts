@@ -6,10 +6,14 @@
  * (geravam `SicroRoadObject` do engine v1). A conversão OSM → road
  * agora vive 100% em `road-parity/osmAdapter.ts` (Python Parity Engine).
  *
+ * Também removido: `osmTagToRoadStyle` (dependia do `RoadStyle` v1,
+ * substituído por `parityRoadWidthMetersByHighway` no parity adapter).
+ *
  * Este módulo retém apenas o que é **fonte-agnóstica de motor**:
  *   - Tipos compartilhados (OsmNode, OsmWay, OsmDataset, OsmViewport)
- *   - Helpers de classificação tag → estilo (osmTagToRoadStyle, osmLanesHint,
- *     osmOnewayToDirection)
+ *   - `osmLanesHint` — hint cru de lanes
+ *   - `osmOnewayToDirection` — classificação one_way/two_way/unknown
+ *     (literal type, sem depender do schema)
  *   - Simplificação Douglas-Peucker (simplifyPolylineDP) — usada pelo
  *     adapter parity para reduzir nodes redundantes
  *   - Projeção lon/lat → canvas (projectLonLat, projectWay)
@@ -19,11 +23,14 @@
  * Tudo aqui é puro — fácil de testar, sem DOM, sem Tauri, sem fetch real.
  */
 
-import type { RoadDirection, RoadStyle, SicroPoint } from "./schema";
+import type { SicroPoint } from "./schema";
 
-// Re-export pros consumers que importavam direto deste módulo.
-// `schema.ts` permanece a fonte canônica.
-export type { RoadDirection, RoadStyle };
+/**
+ * Classificação de direção lida da tag `oneway=*` do OSM. Literal type
+ * local — antes esse era o `RoadDirection` do schema v1, mas o parity
+ * adapter só precisa distinguir mão única de mão dupla.
+ */
+export type OsmDirection = "one_way" | "two_way" | "unknown";
 
 /** A single OSM node — geographic point with stable id. */
 export interface OsmNode {
@@ -68,45 +75,6 @@ export interface OsmViewport {
 }
 
 /**
- * Map an OSM `highway=*` tag to one of our `RoadStyle` presets.
- * Conservative — anything we don't recognise becomes `urban`.
- */
-export function osmTagToRoadStyle(
-  tags: Record<string, string>,
-): RoadStyle {
-  const h = tags.highway;
-  if (!h) return "urban";
-  switch (h) {
-    case "motorway":
-    case "trunk":
-    case "primary":
-    case "primary_link":
-    case "motorway_link":
-    case "trunk_link":
-      return "highway";
-    case "secondary":
-    case "secondary_link":
-      return "avenue";
-    case "tertiary":
-    case "tertiary_link":
-    case "residential":
-    case "living_street":
-    case "unclassified":
-      return "urban";
-    case "service":
-    case "parking_aisle":
-      return "parking";
-    case "track":
-    case "path":
-    case "footway":
-    case "cycleway":
-      return "dirt";
-    default:
-      return "urban";
-  }
-}
-
-/**
  * Number of lanes hinted by the OSM `lanes=*` tag (when present and
  * parseable). Falls back to the road style's default by returning null.
  */
@@ -120,7 +88,7 @@ export function osmLanesHint(
 }
 
 /**
- * Mapeia a tag `oneway=*` para um valor `RoadDirection`.
+ * Mapeia a tag `oneway=*` para um valor `OsmDirection`.
  *
  * Tabela OSM (https://wiki.openstreetmap.org/wiki/Key:oneway):
  *   - `yes`, `true`, `1`     → one_way
@@ -133,7 +101,7 @@ export function osmLanesHint(
  */
 export function osmOnewayToDirection(
   tags: Record<string, string>,
-): RoadDirection {
+): OsmDirection {
   const raw = tags.oneway;
   if (raw == null) return "unknown";
   const v = String(raw).trim().toLowerCase();
@@ -273,27 +241,167 @@ export function simplifyPolylineDP<T extends Vec2Like>(
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Overpass fetch — implementação real (HTTP + cache em memória + timeout).
+//
+// A consulta usa o endpoint público Overpass-API (overpass-api.de). O modal
+// passa uma bbox geográfica e a função:
+//   1. Verifica cache em memória keyed pela bbox arredondada (5 casas
+//      decimais — ~1 m de granularidade). Cache hit ⇒ retorna `from_cache: true`.
+//   2. Cache miss ⇒ POSTa a query Overpass QL no endpoint, com timeout de 25 s.
+//   3. Parseia o JSON e separa nodes (geometria) das ways (com tags).
+//   4. Armazena no cache antes de retornar.
+//
+// Privacidade: apenas a bbox geográfica é enviada — nenhum dado pericial
+// vaza do app.
+
+/** Endpoint default Overpass-API público. */
+const OVERPASS_ENDPOINT = "https://overpass-api.de/api/interpreter";
+
+/** Timeout do POST (ms). Overpass costuma responder em < 5 s pra bboxes pequenas. */
+const OVERPASS_TIMEOUT_MS = 25_000;
+
+/** Cache em memória — key = bbox quantizada; valor = dataset. */
+const overpassCache = new Map<string, OsmDataset>();
+
+function bboxCacheKey(bbox: {
+  min_lat: number;
+  max_lat: number;
+  min_lon: number;
+  max_lon: number;
+}): string {
+  // Arredonda a 5 casas decimais (~1 m) para que micro-variações de UI
+  // não percam o cache.
+  const r = (v: number) => v.toFixed(5);
+  return `${r(bbox.min_lat)},${r(bbox.min_lon)},${r(bbox.max_lat)},${r(bbox.max_lon)}`;
+}
+
 /**
- * Stub. A implementação real do fetch Overpass vive no modal `OsmImportModal`
- * (com cache em memória e timeout). Esta função fica aqui só pra preservar
- * o contrato esperado por código legado que ainda importa.
+ * Monta a query Overpass QL para buscar todas as ways `highway=*` dentro
+ * da bbox + os nodes referenciados. Saída em JSON.
+ *
+ * Sintaxe:
+ *   - `[out:json][timeout:25];` — output JSON, timeout 25 s.
+ *   - `(way["highway"](bbox);)` — todas as ways `highway` dentro da bbox.
+ *   - `out body; >; out skel qt;` — emite way + tags, depois os nodes
+ *     referenciados, e finalmente as coordenadas dos nodes em formato
+ *     compacto.
  */
-export async function fetchOverpassBBox(_bbox: {
+function buildOverpassQuery(bbox: {
+  min_lat: number;
+  max_lat: number;
+  min_lon: number;
+  max_lon: number;
+}): string {
+  const south = bbox.min_lat;
+  const west = bbox.min_lon;
+  const north = bbox.max_lat;
+  const east = bbox.max_lon;
+  return `[out:json][timeout:25];
+(
+  way["highway"](${south},${west},${north},${east});
+);
+out body;
+>;
+out skel qt;`;
+}
+
+/**
+ * Busca o dataset OSM (nodes + ways) dentro da bbox via Overpass-API.
+ *
+ * Cache em memória (chave = bbox arredondada). Cache hit retorna
+ * `from_cache: true`. Limpa via `clearOverpassCache()`.
+ *
+ * Erros HTTP / parse / timeout viram `Error` com mensagem humana — o
+ * modal mostra essa mensagem na faixa de erro.
+ */
+export async function fetchOverpassBBox(bbox: {
   min_lat: number;
   max_lat: number;
   min_lon: number;
   max_lon: number;
 }): Promise<OsmDataset> {
-  throw new Error(
-    "OSM fetch stub — Overpass real impl é feita inline no OsmImportModal. " +
-      "Importe diretamente lá se precisar.",
-  );
+  const key = bboxCacheKey(bbox);
+  const cached = overpassCache.get(key);
+  if (cached) {
+    return { ...cached, from_cache: true };
+  }
+
+  const query = buildOverpassQuery(bbox);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), OVERPASS_TIMEOUT_MS);
+
+  let resp: Response;
+  try {
+    resp = await fetch(OVERPASS_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    clearTimeout(timer);
+    const msg = (e as Error).name === "AbortError"
+      ? "Tempo esgotado consultando o Overpass (verifique a conexão)."
+      : `Falha de rede ao consultar o Overpass: ${(e as Error).message}`;
+    throw new Error(msg);
+  }
+  clearTimeout(timer);
+
+  if (!resp.ok) {
+    throw new Error(
+      `Overpass respondeu com status ${resp.status}. Tente novamente em alguns segundos.`,
+    );
+  }
+
+  let json: {
+    elements?: Array<{
+      type?: string;
+      id?: number;
+      lat?: number;
+      lon?: number;
+      nodes?: number[];
+      tags?: Record<string, string>;
+    }>;
+  };
+  try {
+    json = await resp.json();
+  } catch (e) {
+    throw new Error(`Resposta inválida do Overpass: ${(e as Error).message}`);
+  }
+
+  const elements = Array.isArray(json.elements) ? json.elements : [];
+  const nodes: OsmNode[] = [];
+  const ways: OsmWay[] = [];
+  for (const el of elements) {
+    if (!el || typeof el.id !== "number") continue;
+    if (el.type === "node" && typeof el.lat === "number" && typeof el.lon === "number") {
+      nodes.push({ id: el.id, lat: el.lat, lon: el.lon });
+    } else if (
+      el.type === "way" &&
+      Array.isArray(el.nodes) &&
+      el.nodes.length >= 2
+    ) {
+      ways.push({
+        id: el.id,
+        node_refs: el.nodes.filter((n): n is number => typeof n === "number"),
+        tags: el.tags ?? {},
+      });
+    }
+  }
+
+  const dataset: OsmDataset = { nodes, ways, from_cache: false };
+  overpassCache.set(key, dataset);
+  return dataset;
 }
 
 /**
- * Cache opcional (limpa via `clearOverpassCache`) usado pelo modal — função
- * stub aqui pra preservar a API. O cache real está dentro do modal.
+ * Limpa o cache em memória do Overpass. Útil pro botão "Recarregar" do
+ * modal — força nova consulta mesmo se a bbox bater.
  */
 export function clearOverpassCache(): void {
-  // no-op: cache fica no modal
+  overpassCache.clear();
 }

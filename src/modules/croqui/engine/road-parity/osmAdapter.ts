@@ -215,6 +215,17 @@ export interface OsmParityImportOptions {
    * Default true (briefing H.5).
    */
   ignore_non_vehicle?: boolean;
+  /**
+   * Hard cap por raio — quando true, cada way é clipada ao círculo de
+   * `input.radius_m` centrado no sinistro. Pedaços fora do círculo são
+   * descartados. Quando uma way entra/sai múltiplas vezes, vira várias
+   * sub-vias. Default true (Fase S round 2).
+   *
+   * Rotatórias NÃO são clipadas (ring fechado precisa de geometria
+   * completa para virar centro + raio; se o centro está fora do raio
+   * a rotatória inteira é descartada).
+   */
+  clip_to_radius?: boolean;
 }
 
 export interface OsmParityImportStats {
@@ -433,6 +444,7 @@ interface ResolvedOptions {
   min_way_length_m: number;
   preserve_roundabouts: boolean;
   ignore_non_vehicle: boolean;
+  clip_to_radius: boolean;
 }
 
 function resolveOptions(opts?: OsmParityImportOptions): ResolvedOptions {
@@ -442,7 +454,123 @@ function resolveOptions(opts?: OsmParityImportOptions): ResolvedOptions {
     min_way_length_m: Math.max(opts?.min_way_length_m ?? 4, 0),
     preserve_roundabouts: opts?.preserve_roundabouts ?? true,
     ignore_non_vehicle: opts?.ignore_non_vehicle ?? true,
+    clip_to_radius: opts?.clip_to_radius ?? true,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Clip por raio — corta polilinha pelo círculo de raio R centrado na origem.
+//
+// Algoritmo Cohen-Sutherland-like para círculo:
+//   - Para cada segmento p→q:
+//     * Se ambos dentro do círculo: emite o segmento.
+//     * Se ambos fora: descarta.
+//     * Caso misto: calcula interseção(ões) com o círculo e emite só
+//       o trecho dentro.
+//   - Quando o trecho dentro termina (saída do círculo), a sub-polilinha
+//     atual fecha e uma nova começa quando reentra.
+//
+// Resultado: `Vec2M[][]` — array de sub-polilinhas, cada uma totalmente
+// dentro (ou tocando) o círculo.
+
+/**
+ * Resolve interseção(ões) do segmento `a→b` com o círculo de raio `R`
+ * centrado na origem. Retorna parâmetros `t ∈ [0, 1]` (posição
+ * normalizada no segmento). Pode retornar 0, 1 ou 2 valores.
+ */
+function segmentCircleIntersections(
+  a: Vec2M,
+  b: Vec2M,
+  R: number,
+): number[] {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const A = dx * dx + dy * dy;
+  if (A < 1e-12) return []; // a == b
+  const B = 2 * (a.x * dx + a.y * dy);
+  const C = a.x * a.x + a.y * a.y - R * R;
+  const disc = B * B - 4 * A * C;
+  if (disc < 0) return [];
+  const sqrtD = Math.sqrt(disc);
+  const t1 = (-B - sqrtD) / (2 * A);
+  const t2 = (-B + sqrtD) / (2 * A);
+  const out: number[] = [];
+  if (t1 > 0 && t1 < 1) out.push(t1);
+  if (t2 > 0 && t2 < 1 && t2 !== t1) out.push(t2);
+  return out;
+}
+
+function lerpVec(a: Vec2M, b: Vec2M, t: number): Vec2M {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+}
+
+function isInsideCircle(p: Vec2M, R: number): boolean {
+  return p.x * p.x + p.y * p.y <= R * R;
+}
+
+/**
+ * Clipa uma polilinha contra o círculo de raio `R` centrado na origem.
+ * Retorna 0..N sub-polilinhas (cada uma com >= 2 pontos), todas dentro
+ * do círculo.
+ *
+ * Sem suavização de bordas — onde a polilinha sai do círculo, ela é
+ * cortada exatamente na interseção. O perito pode arrastar os endpoints
+ * depois para refinar.
+ */
+export function clipPolylineToCircle(
+  points: ReadonlyArray<Vec2M>,
+  R: number,
+): Vec2M[][] {
+  if (points.length < 2 || R <= 0) return [];
+
+  const result: Vec2M[][] = [];
+  let current: Vec2M[] = [];
+
+  const flush = () => {
+    if (current.length >= 2) result.push(current);
+    current = [];
+  };
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i] as Vec2M;
+    const b = points[i + 1] as Vec2M;
+    const aIn = isInsideCircle(a, R);
+    const bIn = isInsideCircle(b, R);
+
+    if (aIn && bIn) {
+      // Ambos dentro — emite p1, e p2 vai como p1 da próxima iter.
+      if (current.length === 0) current.push(a);
+      current.push(b);
+    } else if (aIn && !bIn) {
+      // Sai do círculo no meio do segmento.
+      const ts = segmentCircleIntersections(a, b, R);
+      if (current.length === 0) current.push(a);
+      if (ts.length >= 1) {
+        current.push(lerpVec(a, b, ts[0]!));
+      }
+      flush();
+    } else if (!aIn && bIn) {
+      // Entra no círculo no meio.
+      flush();
+      const ts = segmentCircleIntersections(a, b, R);
+      if (ts.length >= 1) {
+        current.push(lerpVec(a, b, ts[0]!));
+      }
+      current.push(b);
+    } else {
+      // Ambos fora — pode haver chord (2 interseções) atravessando o
+      // círculo. Raro pra um único segmento mas existe.
+      const ts = segmentCircleIntersections(a, b, R);
+      if (ts.length === 2) {
+        flush();
+        current.push(lerpVec(a, b, ts[0]!));
+        current.push(lerpVec(a, b, ts[1]!));
+        flush();
+      }
+    }
+  }
+  flush();
+  return result;
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -523,52 +651,86 @@ export function convertOsmDatasetToParityObjects(
       continue;
     }
 
-    // Detecta rotatória ANTES de simplificar (depende do ring completo).
+    // Detecta rotatória ANTES de clipar/simplificar (depende do ring completo).
     const isRoundabout =
       options.preserve_roundabouts && isOsmRoundaboutForParity(w, raw);
     const isRing =
       validRefs.length >= 5 &&
       validRefs[0] === validRefs[validRefs.length - 1];
 
-    // Comprimento total (m).
-    let totalLen = 0;
-    for (let i = 1; i < raw.length; i++) {
-      const a = raw[i - 1] as Vec2M;
-      const b = raw[i] as Vec2M;
-      totalLen += Math.hypot(b.x - a.x, b.y - a.y);
-    }
-    if (totalLen < options.min_way_length_m) {
-      skipped++;
-      warnings.push(
-        `Way ${w.id} ignorada: comprimento ${totalLen.toFixed(1)} m < mínimo ${options.min_way_length_m} m.`,
-      );
-      continue;
-    }
-
-    // Simplifica — preserva ring intacto para rotatórias.
-    let simplified: Vec2M[];
-    if (isRoundabout && isRing) {
-      const head = raw.slice(0, -1);
-      const simp = simplifyPolylineDP(head, options.simplify_tolerance_m);
-      simplified = [...simp, simp[0] as Vec2M];
+    // Fase S round 2 — Hard cap por raio. Rotatórias NÃO são clipadas
+    // (precisa do ring inteiro pra virar centro+raio). Vias regulares
+    // viram 0..N sub-vias após o clip — cada pedaço dentro do círculo
+    // vira sua própria way métrica.
+    let segmentsToProcess: Vec2M[][];
+    if (options.clip_to_radius && !isRoundabout) {
+      segmentsToProcess = clipPolylineToCircle(raw, input.radius_m);
+      if (segmentsToProcess.length === 0) {
+        skipped++;
+        // Não emite warning — way fora do raio é o caso esperado.
+        continue;
+      }
+    } else if (isRoundabout) {
+      // Rotatória: descarta se o centro está fora do raio.
+      let sumX = 0;
+      let sumY = 0;
+      const head = isRing ? raw.slice(0, -1) : raw;
+      for (const p of head) {
+        sumX += p.x;
+        sumY += p.y;
+      }
+      const cx = sumX / head.length;
+      const cy = sumY / head.length;
+      if (cx * cx + cy * cy > input.radius_m * input.radius_m) {
+        skipped++;
+        continue;
+      }
+      segmentsToProcess = [raw];
     } else {
-      simplified = simplifyPolylineDP(raw, options.simplify_tolerance_m);
+      segmentsToProcess = [raw];
     }
 
-    if (simplified.length < 2) {
-      skipped++;
-      warnings.push(
-        `Way ${w.id} ignorada: geometria insuficiente após simplificação.`,
-      );
-      continue;
-    }
+    for (const seg of segmentsToProcess) {
+      // Comprimento total (m).
+      let totalLen = 0;
+      for (let i = 1; i < seg.length; i++) {
+        const a = seg[i - 1] as Vec2M;
+        const b = seg[i] as Vec2M;
+        totalLen += Math.hypot(b.x - a.x, b.y - a.y);
+      }
+      if (totalLen < options.min_way_length_m) {
+        skipped++;
+        warnings.push(
+          `Way ${w.id} ignorada: comprimento ${totalLen.toFixed(1)} m < mínimo ${options.min_way_length_m} m.`,
+        );
+        continue;
+      }
 
-    wayMetrics.push({
-      way: w,
-      nodeRefs: validRefs,
-      metricPoints: simplified,
-      isRoundabout,
-    });
+      // Simplifica — preserva ring intacto para rotatórias.
+      let simplified: Vec2M[];
+      if (isRoundabout && isRing) {
+        const head = seg.slice(0, -1);
+        const simp = simplifyPolylineDP(head, options.simplify_tolerance_m);
+        simplified = [...simp, simp[0] as Vec2M];
+      } else {
+        simplified = simplifyPolylineDP(seg, options.simplify_tolerance_m);
+      }
+
+      if (simplified.length < 2) {
+        skipped++;
+        warnings.push(
+          `Way ${w.id} ignorada: geometria insuficiente após simplificação.`,
+        );
+        continue;
+      }
+
+      wayMetrics.push({
+        way: w,
+        nodeRefs: validRefs,
+        metricPoints: simplified,
+        isRoundabout,
+      });
+    }
   }
 
   if (wayMetrics.length === 0) {
@@ -590,10 +752,22 @@ export function convertOsmDatasetToParityObjects(
 
   // 6. Bbox métrico + escala uniforme.
   //
-  // Calculamos px/m como sugestão, mas as coordenadas dos objetos
-  // parity ficam em **metros de mundo** (não pixels). O renderer
-  // aplica px_per_m vindo de `doc.scale.px_per_m` no momento de
-  // desenhar — ver `RoadParityRenderer`.
+  // ESCALA FIXA — independente do raio escolhido. Antes a escala era
+  // calculada como `canvas / (radius_m * 2)`, então raios grandes
+  // (200 m) faziam ruas finíssimas e raios pequenos (25 m) faziam
+  // ruas grossas. Visualmente a "qualidade" das vias dependia da
+  // área importada — não fazia sentido.
+  //
+  // Agora usamos um RAIO DE REFERÊNCIA constante (25 m) pra calcular
+  // o `px_per_m`. Resultado: largura de rua igual em qualquer
+  // importação. Se o usuário pediu 200 m, o conteúdo simplesmente
+  // ocupa um quadrado lógico de ~5760 px × 5760 px e ele navega
+  // dando zoom out (faixa atual: 5 %–10000 %, dá conta de qualquer
+  // tamanho de bairro).
+  //
+  // Quando não há clip, mantém o comportamento antigo (fit do bbox
+  // das vias) — usado quando a importação não vem com raio definido.
+  const REFERENCE_RADIUS_M = 25;
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
@@ -608,22 +782,35 @@ export function convertOsmDatasetToParityObjects(
   }
   const usableW = input.canvas.width * (1 - 2 * options.margin);
   const usableH = input.canvas.height * (1 - 2 * options.margin);
-  const metricW = Math.max(maxX - minX, 1);
-  const metricH = Math.max(maxY - minY, 1);
+  let metricW: number;
+  let metricH: number;
+  let bboxCxM: number;
+  let bboxCyM: number;
+  if (options.clip_to_radius && input.radius_m > 0) {
+    // Usa o RAIO DE REFERÊNCIA FIXO (25 m) pra escala, NÃO o raio
+    // escolhido pelo perito. Isso garante px_per_m idêntico em todas
+    // as importações — uma rua de 7 m sempre tem a mesma largura
+    // visual, seja em raio 25, 100 ou 200 m. Áreas maiores que o
+    // raio de referência simplesmente extrapolam o canvas (overflow
+    // gerenciado via pan/zoom).
+    metricW = REFERENCE_RADIUS_M * 2;
+    metricH = REFERENCE_RADIUS_M * 2;
+    bboxCxM = 0;
+    bboxCyM = 0;
+  } else {
+    metricW = Math.max(maxX - minX, 1);
+    metricH = Math.max(maxY - minY, 1);
+    bboxCxM = (minX + maxX) / 2;
+    bboxCyM = (minY + maxY) / 2;
+  }
   const scale = Math.min(usableW / metricW, usableH / metricH);
 
-  // Centro do conjunto métrico — usado para offset de canvas.
   // Em coords parity (mundo, metros), os objetos ficam centralizados
-  // na média do bbox; o renderer translada para o centro do canvas
-  // ao aplicar pxPerM.
-  //
-  // Por simplicidade e paridade com o renderer manual (que assume
-  // coords absolutas em metros), recentralizamos para que (minX+maxX)/2,
-  // (minY+maxY)/2 vire (canvas_w/2/pxPerM, canvas_h/2/pxPerM).
+  // no centro do canvas; o renderer translada conforme pxPerM. Mesma
+  // lógica que estava antes — só muda o quê estamos centralizando
+  // (círculo do raio vs bbox das vias).
   const targetCxM = (input.canvas.width / 2) / Math.max(scale, 0.0001);
   const targetCyM = (input.canvas.height / 2) / Math.max(scale, 0.0001);
-  const bboxCxM = (minX + maxX) / 2;
-  const bboxCyM = (minY + maxY) / 2;
   const recentre = (p: Vec2M): Vec2M => ({
     x: p.x - bboxCxM + targetCxM,
     y: p.y - bboxCyM + targetCyM,

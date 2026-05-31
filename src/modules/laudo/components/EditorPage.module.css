@@ -578,6 +578,109 @@
   text-align: center;
 }
 
+/* Pós-laudo T — Legenda apagada não pode ocupar espaço. Quando o
+ * conteúdo da figcaption está vazio (truly :empty) ou contém só o
+ * `<br class="ProseMirror-trailingBreak">` placeholder do PM, colapsa
+ * pra zero altura. Escopada via `.editorWrap` pra atingir o que vê o
+ * user no editor TipTap. `:has()` é suportado em WebView2/Edge
+ * moderno (Chromium 105+).
+ *
+ * UX: quando a figure ESTÁ selecionada (.ProseMirror-selectednode),
+ * mostramos a figcaption mesmo vazia, como uma linha fina centralizada
+ * com placeholder visual. Assim o user consegue clicar pra re-digitar.
+ * Quando NÃO selecionada (fluxo normal de leitura/edição do texto),
+ * legenda vazia some — foto fica colada no próximo bloco. */
+.editorWrap :global(figure[data-sicro-figure]:not(.ProseMirror-selectednode) figcaption:empty),
+.editorWrap :global(figure[data-sicro-figure]:not(.ProseMirror-selectednode) figcaption:has(> br:only-child)) {
+  display: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  line-height: 0 !important;
+}
+/* Figcaption vazia em figure selecionada — fininha e discreta pra dar
+ * affordance de clique sem competir com o caption preenchido. */
+.editorWrap :global(figure[data-sicro-figure].ProseMirror-selectednode figcaption:empty),
+.editorWrap :global(figure[data-sicro-figure].ProseMirror-selectednode figcaption:has(> br:only-child)) {
+  min-height: 1.2em;
+  opacity: 0.5;
+  margin-top: 0.2em !important;
+}
+
+/* Pós-laudo U — TextBox com borda transparente precisa de affordance
+ * visual NO EDITOR (não no export). Sem isso, uma textbox vazia + sem
+ * borda + sem fill é invisível e o user não acha onde clicar. Outline
+ * pontilhado bem suave aparece SÓ no editor, SÓ quando a borda está
+ * desligada (transparente) e a caixa não está selecionada (o overlay
+ * cobre o caso selected). */
+.editorWrap :global(div[data-sicro-textbox][data-border-enabled="false"]:not(.ProseMirror-selectednode)) {
+  outline: 1px dashed rgba(120, 120, 120, 0.35);
+  outline-offset: -1px;
+}
+
+/* Pós-laudo U — Texto da TextBox sumia quando selecionada.
+ *
+ * Causa raiz: o ProseMirror, ao aplicar NodeSelection, define a DOM
+ * Selection range cobrindo o node inteiro. O browser (WebView2/Edge)
+ * pinta o highlight nativo (azul, opaco) sobre toda a área — em fundo
+ * claro com texto escuro, isso COBRE o texto e dá efeito de "sumiu".
+ *
+ * Fix em duas camadas:
+ *   1. NodeView sobrescreve `selectNode`/`deselectNode` pra NÃO
+ *      adicionar a classe `.ProseMirror-selectednode` (que disparava
+ *      outline + ::after default do PM). Usa atributo nosso
+ *      `data-textbox-selected="true"` em vez.
+ *   2. CSS zera o `::selection` quando esse atributo está set —
+ *      remove o highlight nativo do browser que cobria o texto.
+ *
+ * Em modo de edição de texto (TextSelection dentro do textbox), o
+ * `selectNode` do PM não é chamado, então o atributo não está set, e
+ * o user vê normalmente o highlight azul ao arrastar pra selecionar
+ * palavras. */
+.editorWrap :global(div[data-sicro-textbox][data-textbox-selected="true"]::selection),
+.editorWrap :global(div[data-sicro-textbox][data-textbox-selected="true"] ::selection),
+.editorWrap :global(div[data-sicro-textbox][data-textbox-selected="true"] *::selection) {
+  background-color: transparent !important;
+  color: inherit !important;
+}
+/* Pós-laudo U — user-select: none no contentDOM quando o textbox tá
+ * NodeSelected impede o browser de renderizar QUALQUER highlight de
+ * seleção dentro dele. Isso é o golpe final caso a limpeza da DOM
+ * Selection no selectNode não pegue (PM pode re-aplicar em transações
+ * subsequentes). Em modo edição de texto, o atributo `data-textbox-
+ * selected` não está set, então o user-select volta a "auto" e o
+ * user consegue arrastar pra selecionar texto normalmente. */
+.editorWrap :global(div[data-sicro-textbox][data-textbox-selected="true"] div[data-sicro-textbox-content]),
+.editorWrap :global(div[data-sicro-textbox][data-textbox-selected="true"] div[data-sicro-textbox-content] *) {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+/* Defensiva — força visibilidade absoluta do conteúdo. Se sobrar
+ * qualquer regra do PM/TipTap/browser/CSS-da-vida que esteja
+ * escondendo o texto via opacity, visibility ou color, isso vence. */
+.editorWrap :global(div[data-sicro-textbox][data-textbox-selected="true"] div[data-sicro-textbox-content]),
+.editorWrap :global(div[data-sicro-textbox][data-textbox-selected="true"] div[data-sicro-textbox-content] *) {
+  visibility: visible !important;
+  opacity: 1 !important;
+  color: #1a1a1a !important;
+}
+/* Fallback — caso a classe do PM seja adicionada por algum caminho
+ * (e.g., via outro plugin, transição de selecionamento), o atributo
+ * abaixo cobre o caso. As mesmas regras com a classe original. */
+.editorWrap :global(div[data-sicro-textbox].ProseMirror-selectednode) {
+  outline: none !important;
+}
+.editorWrap :global(div[data-sicro-textbox].ProseMirror-selectednode::after),
+.editorWrap :global(div[data-sicro-textbox].ProseMirror-selectednode::before) {
+  display: none !important;
+  background: transparent !important;
+  content: none !important;
+}
+.editorWrap :global(div[data-sicro-textbox].ProseMirror-selectednode ::selection),
+.editorWrap :global(div[data-sicro-textbox].ProseMirror-selectednode *::selection) {
+  background-color: transparent !important;
+  color: inherit !important;
+}
+
 /* Table — F7.2 bug fix: aplica em TODAS as tables dentro do editor
  * (sem depender de data-sicro-table que pode não aparecer). */
 .editorWrap :global(.sicro-editor-content table) {

@@ -1,12 +1,18 @@
 /**
- * Testes dos templates F5.
+ * Testes do registry de templates de laudo.
  *
- * Verifica:
- *   - Os 9 templates do registry (8 + alias) existem e têm shape válido.
- *   - `findTemplate` faz fallback para "documento_livre" em IDs inválidos.
- *   - O alias legado `sinistro_transito_simples` → `sinistro_transito`.
- *   - Todo `build(title)` retorna JSONContent com type="doc" e content.
- *   - Pelo menos um template usa `fieldPlaceholder` (a feature core do F5).
+ * Estado atual: só há UM template ("Documento em branco"). Todos os
+ * outros modelos foram removidos. Os testes garantem:
+ *   - TEMPLATES tem exatamente 1 template
+ *   - O template tem shape válido
+ *   - `findTemplate` faz fallback para `documento_em_branco`
+ *   - `findTemplateWithLegacyAlias` mapeia todos os IDs antigos
+ *     (sinistro_transito, arrombamento, local_crime, etc) para o
+ *     documento em branco — assim laudos antigos não quebram
+ *   - O `build()` retorna `doc` com heading do título
+ *   - O corpo é genuinamente vazio (sem campos automáticos por
+ *     padrão; o cabeçalho oficial vem em camada separada via
+ *     `institutional_template`)
  */
 
 import { describe, expect, it } from "vitest";
@@ -16,110 +22,83 @@ import {
   TEMPLATES,
 } from "../index";
 
-describe("Registry de templates F5", () => {
-  it("tem 9 templates publicados", () => {
-    expect(TEMPLATES.length).toBe(9);
+describe("Registry de templates", () => {
+  it("tem exatamente 1 template publicado", () => {
+    expect(TEMPLATES.length).toBe(1);
   });
 
-  it("todos os IDs são únicos", () => {
-    const ids = TEMPLATES.map((t) => t.id);
-    expect(new Set(ids).size).toBe(ids.length);
+  it("o template é o Documento em branco", () => {
+    expect(TEMPLATES[0]?.id).toBe("documento_em_branco");
   });
 
-  it("inclui os 9 templates esperados", () => {
-    const ids = new Set(TEMPLATES.map((t) => t.id));
-    const expected = [
-      "documento_livre",
-      "em_branco",
-      "generico",
-      "sinistro_transito",
-      "arrombamento",
-      "local_crime",
-      "avaliacao_merceologica",
-      "constatacao",
-      "exame_veicular",
-    ];
-    for (const id of expected) {
-      expect(ids.has(id)).toBe(true);
-    }
-  });
-
-  it("cada template tem name, description, category e build", () => {
-    for (const t of TEMPLATES) {
-      expect(t.name).toBeTruthy();
-      expect(t.description).toBeTruthy();
-      expect(t.category).toBeTruthy();
-      expect(typeof t.build).toBe("function");
-    }
+  it("o template tem name, description, category e build", () => {
+    const t = TEMPLATES[0]!;
+    expect(t.name).toBe("Documento em branco");
+    expect(t.description).toBeTruthy();
+    expect(t.category).toBe("Genérico");
+    expect(typeof t.build).toBe("function");
   });
 });
 
-describe("findTemplate / findTemplateWithLegacyAlias", () => {
-  it("encontra template por ID", () => {
-    expect(findTemplate("sinistro_transito").id).toBe("sinistro_transito");
-    expect(findTemplate("arrombamento").id).toBe("arrombamento");
+describe("findTemplate", () => {
+  it("encontra o template por ID exato", () => {
+    expect(findTemplate("documento_em_branco").id).toBe("documento_em_branco");
   });
 
-  it("retorna 'documento_livre' como fallback em ID desconhecido", () => {
-    expect(findTemplate("xpto_inexistente").id).toBe("documento_livre");
-  });
-
-  it("legacy alias sinistro_transito_simples → sinistro_transito", () => {
-    expect(findTemplateWithLegacyAlias("sinistro_transito_simples").id).toBe(
-      "sinistro_transito",
-    );
-  });
-
-  it("legacy alias preserva IDs novos", () => {
-    expect(findTemplateWithLegacyAlias("arrombamento").id).toBe("arrombamento");
+  it("retorna o template padrão como fallback em ID desconhecido", () => {
+    expect(findTemplate("xpto_inexistente").id).toBe("documento_em_branco");
   });
 });
 
-describe("Templates build() — shape", () => {
-  for (const t of TEMPLATES) {
-    it(`${t.id}: build("Teste") retorna doc válido`, () => {
-      const json = t.build("Teste");
-      expect(json.type).toBe("doc");
-      expect(Array.isArray(json.content)).toBe(true);
-      // Tem pelo menos um heading nível 1 com o título.
-      const firstHeading = (json.content ?? []).find(
-        (n: { type?: string }) => n.type === "heading",
-      ) as { content?: { text?: string }[] } | undefined;
-      expect(firstHeading).toBeDefined();
-      expect(firstHeading?.content?.[0]?.text).toContain("Teste");
+describe("findTemplateWithLegacyAlias", () => {
+  // Todos os IDs dos templates removidos devem cair no padrão sem
+  // quebrar — laudos antigos guardam esses ids em `template_id`.
+  const legacy = [
+    "documento_livre",
+    "em_branco",
+    "generico",
+    "sinistro_transito",
+    "sinistro_transito_simples",
+    "arrombamento",
+    "local_crime",
+    "avaliacao_merceologica",
+    "constatacao",
+    "exame_veicular",
+  ];
+
+  for (const id of legacy) {
+    it(`legacy "${id}" → documento_em_branco`, () => {
+      expect(findTemplateWithLegacyAlias(id).id).toBe("documento_em_branco");
     });
   }
+
+  it("IDs desconhecidos também caem no padrão", () => {
+    expect(findTemplateWithLegacyAlias("foo").id).toBe("documento_em_branco");
+  });
 });
 
-describe("Templates — uso de fieldPlaceholder (F5 feature)", () => {
-  it("Sinistro de Trânsito usa placeholders", () => {
-    const json = findTemplate("sinistro_transito").build("Laudo");
-    const json_text = JSON.stringify(json);
-    expect(json_text).toContain("fieldPlaceholder");
-    expect(json_text).toContain("numero_bo");
+describe("Documento em branco — build()", () => {
+  it("retorna um doc com type=doc e um heading com o título", () => {
+    const json = findTemplate("documento_em_branco").build("Sinistro Av FAB");
+    expect(json.type).toBe("doc");
+    expect(Array.isArray(json.content)).toBe(true);
+    const firstHeading = (json.content ?? []).find(
+      (n: { type?: string }) => n.type === "heading",
+    ) as { content?: { text?: string }[] } | undefined;
+    expect(firstHeading).toBeDefined();
+    expect(firstHeading?.content?.[0]?.text).toBe("Sinistro Av FAB");
   });
 
-  it("Documento Livre usa pelo menos um placeholder", () => {
-    const json = findTemplate("documento_livre").build("Teste");
-    expect(JSON.stringify(json)).toContain("fieldPlaceholder");
+  it("usa título padrão quando build() é chamado sem título", () => {
+    const json = findTemplate("documento_em_branco").build("");
+    const firstHeading = (json.content ?? []).find(
+      (n: { type?: string }) => n.type === "heading",
+    ) as { content?: { text?: string }[] } | undefined;
+    expect(firstHeading?.content?.[0]?.text).toBe("Laudo Pericial");
   });
 
-  it("Em Branco NÃO usa placeholders (é vazio por design)", () => {
-    const json = findTemplate("em_branco").build("Teste");
+  it("NÃO usa fieldPlaceholder no corpo (cabeçalho é camada separada)", () => {
+    const json = findTemplate("documento_em_branco").build("Teste");
     expect(JSON.stringify(json)).not.toContain("fieldPlaceholder");
-  });
-});
-
-describe("Templates — uso de estilos documentais (F4 → F5)", () => {
-  it("Sinistro de Trânsito carrega data-laudo-style nos headings", () => {
-    const json = findTemplate("sinistro_transito").build("Laudo");
-    const j = JSON.stringify(json);
-    expect(j).toContain("titulo_1");
-    expect(j).toContain("titulo_2");
-  });
-
-  it("Conclusão usa estilo conclusao", () => {
-    const json = findTemplate("sinistro_transito").build("Laudo");
-    expect(JSON.stringify(json)).toContain('"laudoStyle":"conclusao"');
   });
 });

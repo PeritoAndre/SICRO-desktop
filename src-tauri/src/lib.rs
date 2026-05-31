@@ -66,10 +66,13 @@ pub fn run() {
             commands::laudo_commands::list_laudos,
             commands::laudo_commands::read_laudo,
             commands::laudo_commands::save_laudo,
+            commands::laudo_commands::delete_laudo,
             // H — Fluxo gov.br externo
             commands::laudo_commands::import_signed_pdf,
             // O — Drag & drop de fotos no editor de laudo
             commands::laudo_photo_drop::import_dragged_photos_to_laudo,
+            // T — Paste (Ctrl+V) de fotos no editor de laudo
+            commands::laudo_photo_drop::import_pasted_photos_to_laudo,
             // export (Spike C)
             commands::export_commands::export_laudo_html,
             commands::export_commands::export_laudo_pdf,
@@ -96,6 +99,7 @@ pub fn run() {
             commands::croqui_commands::list_croquis,
             commands::croqui_commands::read_croqui,
             commands::croqui_commands::save_croqui,
+            commands::croqui_commands::delete_croqui,
             commands::croqui_commands::export_croqui_png,
             commands::croqui_commands::import_drone_image,
             // video (Spike F)

@@ -1,33 +1,25 @@
 /**
  * DigitalSignatureDialog — assinatura digital do laudo.
  *
- * F12.11 + H — Três tabs:
- *   - **gov.br** (recomendado): exporta PDF, abre o portal
- *     `assinador.iti.gov.br` no browser do SO, perito assina lá, depois
- *     volta e clica "Importar PDF assinado". O backend Tauri grava em
+ * Beta — dois fluxos institucionais reais:
+ *   - **SIGDOCS** (default): sistema oficial de tramitação do Estado
+ *     do Amapá. Exporta PDF, abre o portal embutido para login + assinatura,
+ *     e arquiva o PDF assinado via `import_signed_pdf`.
+ *   - **gov.br**: exporta PDF, abre o portal `assinador.iti.gov.br` no
+ *     browser do SO, perito assina lá, depois volta e clica
+ *     "Importar PDF assinado". O backend Tauri grava em
  *     `laudos/<id>/assinados/` e devolve hash + caminho.
- *   - **A1** (arquivo .pfx): mock — UI registrada, integração real
- *     pendente em MVP futuro com PKCS#12.
- *   - **A3** (token/cartão): mock — UI registrada, integração real
- *     pendente em MVP futuro com PKCS#11.
  *
- * Quando o user confirma:
- *   - Cria `SicroDocSignature` com signed_at = now, signed_hash =
- *     finalization.content_hash, type = escolhido.
- *   - Chama o callback `onSigned`, que persiste via setStatus.
- *
- * UX:
- *   - Aviso amarelo no topo "Modo demonstração — assinatura simulada"
- *     apenas para A1/A3. gov.br não é mock — é assinatura real do ITI.
- *   - Tab default = gov.br.
+ * Os fluxos A1 (.pfx) / A3 (token) foram removidos da UI beta — a
+ * integração real PKCS#12 / PKCS#11 fica para um MVP futuro. O tipo
+ * `"mock"` permanece no schema apenas para compatibilidade com laudos
+ * antigos que já tenham sido assinados em modo demonstração.
  */
 
 import { useState } from "react";
 import {
   ShieldCheck,
   X,
-  FileKey,
-  KeyRound,
   AlertTriangle,
   Globe,
   Landmark,
@@ -69,7 +61,7 @@ interface DigitalSignatureDialogProps {
   onSigned: (signature: SicroDocSignature) => void;
 }
 
-type Tab = "gov_br" | "sigdocs" | "A1" | "A3";
+type Tab = "gov_br" | "sigdocs";
 
 export function DigitalSignatureDialog({
   open,
@@ -83,12 +75,13 @@ export function DigitalSignatureDialog({
   // I — Default = SIGDOCS porque é o fluxo institucional atual do
   // Estado do Amapá. gov.br + A1/A3 ficam como alternativas.
   const [tab, setTab] = useState<Tab>("sigdocs");
-  const [signerName, setSignerName] = useState(finalization.finalized_by);
-  const [signerId, setSignerId] = useState("");
-  const [issuer, setIssuer] = useState("AC SOLUTI Multipla v5");
-  const [validUntil, setValidUntil] = useState("");
-  const [filePassword, setFilePassword] = useState("");
-  const [busy, setBusy] = useState(false);
+  // signerName / signerId são consumidos pelos fluxos gov.br e SIGDOCS
+  // (caem em SicroDocSignature ao importar o PDF assinado). A UI beta
+  // não expõe campo dedicado — usa `finalization.finalized_by` como
+  // valor default. O state continua mutável para um futuro botão
+  // "editar metadados do signatário", se vier a ser necessário.
+  const [signerName] = useState(finalization.finalized_by);
+  const [signerId] = useState("");
 
   // --- H — Estado do fluxo gov.br ---
   const [govExportedPath, setGovExportedPath] = useState<string | null>(
@@ -120,27 +113,6 @@ export function DigitalSignatureDialog({
   const sigdocsSplitOpen = useSigdocsStore((s) => s.coverOpen);
 
   if (!open) return null;
-
-  const canSignA = signerName.trim().length > 0;
-
-  const handleConfirmAClass = async () => {
-    if (!canSignA) return;
-    setBusy(true);
-    await new Promise((r) => setTimeout(r, 200));
-    const sig: SicroDocSignature = {
-      type: "mock",
-      signer_name: signerName.trim(),
-      signer_id: signerId.trim() || undefined,
-      issuer: issuer.trim() || undefined,
-      valid_until: validUntil || undefined,
-      signed_at: new Date().toISOString(),
-      signed_hash: finalization.content_hash,
-      signature_blob: undefined,
-    };
-    onSigned(sig);
-    setBusy(false);
-    onClose();
-  };
 
   // --- H — gov.br flow handlers ---
 
@@ -428,15 +400,6 @@ export function DigitalSignatureDialog({
           </button>
         </header>
 
-        {tab !== "gov_br" && tab !== "sigdocs" && (
-          <div className={styles.warning}>
-            <AlertTriangle size={14} /> Modo demonstração — A1/A3 estão como
-            placeholder. Para uma assinatura válida em produção, use a aba
-            <strong> SIGDOCS</strong> (institucional) ou
-            <strong> gov.br</strong>.
-          </div>
-        )}
-
         <div className={styles.tabs} role="tablist">
           <button
             type="button"
@@ -456,24 +419,6 @@ export function DigitalSignatureDialog({
             onClick={() => setTab("gov_br")}
           >
             <Globe size={13} /> gov.br
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "A1"}
-            className={`${styles.tab} ${tab === "A1" ? styles.tabActive : ""}`}
-            onClick={() => setTab("A1")}
-          >
-            <FileKey size={13} /> A1 (.pfx)
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={tab === "A3"}
-            className={`${styles.tab} ${tab === "A3" ? styles.tabActive : ""}`}
-            onClick={() => setTab("A3")}
-          >
-            <KeyRound size={13} /> A3 (token)
           </button>
         </div>
 
@@ -752,127 +697,17 @@ export function DigitalSignatureDialog({
             </div>
           )}
 
-          {tab !== "gov_br" && tab !== "sigdocs" && (
-            <>
-              <div className={styles.field}>
-                <label htmlFor="sig-name">Titular do certificado</label>
-                <input
-                  id="sig-name"
-                  type="text"
-                  value={signerName}
-                  onChange={(e) => setSignerName(e.target.value)}
-                  placeholder="Nome completo"
-                  autoFocus
-                />
-              </div>
-
-              <div className={styles.fieldRow}>
-                <div className={styles.field}>
-                  <label htmlFor="sig-id">CPF</label>
-                  <input
-                    id="sig-id"
-                    type="text"
-                    value={signerId}
-                    onChange={(e) => setSignerId(e.target.value)}
-                    placeholder="000.000.000-00"
-                  />
-                </div>
-                <div className={styles.field}>
-                  <label htmlFor="sig-valid">Validade</label>
-                  <input
-                    id="sig-valid"
-                    type="date"
-                    value={validUntil}
-                    onChange={(e) => setValidUntil(e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div className={styles.field}>
-                <label htmlFor="sig-ac">Autoridade Certificadora</label>
-                <input
-                  id="sig-ac"
-                  type="text"
-                  value={issuer}
-                  onChange={(e) => setIssuer(e.target.value)}
-                  placeholder="Ex: AC SOLUTI / Serasa Experian"
-                />
-              </div>
-
-              {tab === "A1" && (
-                <div className={styles.field}>
-                  <label htmlFor="sig-pwd">Senha do arquivo .pfx</label>
-                  <input
-                    id="sig-pwd"
-                    type="password"
-                    value={filePassword}
-                    onChange={(e) => setFilePassword(e.target.value)}
-                    placeholder="••••••••"
-                  />
-                  <small className={styles.hint}>
-                    A senha não é persistida — usada só para abrir o cert e
-                    descartada. No mock, fica em memória somente.
-                  </small>
-                </div>
-              )}
-
-              {tab === "A3" && (
-                <div className={styles.a3Info}>
-                  <p>
-                    Insira o token / cartão na leitora. O driver PKCS#11 será
-                    consultado pelo SICRO no momento da assinatura.
-                  </p>
-                  <small className={styles.hint}>
-                    Driver detectado: <strong>Watchdata WD ProxKey</strong>{" "}
-                    (simulado)
-                  </small>
-                </div>
-              )}
-
-              <div className={styles.contentHashCard}>
-                <span className={styles.contentHashLabel}>
-                  Conteúdo a ser assinado
-                </span>
-                <code className={styles.contentHashValue}>
-                  {finalization.content_hash}
-                </code>
-              </div>
-            </>
-          )}
         </div>
 
-        {tab !== "gov_br" && tab !== "sigdocs" && (
-          <footer className={styles.footer}>
-            <button
-              type="button"
-              className={styles.secondaryBtn}
-              onClick={onClose}
-              disabled={busy}
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              className={styles.primaryBtn}
-              onClick={() => void handleConfirmAClass()}
-              disabled={!canSignA || busy}
-            >
-              <ShieldCheck size={13} />{" "}
-              {busy ? "Assinando…" : "Assinar agora"}
-            </button>
-          </footer>
-        )}
-        {(tab === "gov_br" || tab === "sigdocs") && (
-          <footer className={styles.footer}>
-            <button
-              type="button"
-              className={styles.secondaryBtn}
-              onClick={onClose}
-            >
-              Fechar
-            </button>
-          </footer>
-        )}
+        <footer className={styles.footer}>
+          <button
+            type="button"
+            className={styles.secondaryBtn}
+            onClick={onClose}
+          >
+            Fechar
+          </button>
+        </footer>
       </div>
     </div>
   );

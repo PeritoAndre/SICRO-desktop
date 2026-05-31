@@ -4,26 +4,25 @@
  *
  * `crypto.randomUUID()` is available in modern browsers and in the Tauri
  * WebView (Chromium-based), so no extra dep needed.
+ *
+ * Fase S clean cut — Road v1 e Road v2 foram removidos. Vias e
+ * rotatórias são criadas via `road-parity/factories` (`makeParityRoad`,
+ * `makeParityRoundabout`). Este arquivo cobre apenas as primitivas não-via
+ * (veículo, linha, marcador, texto, medição).
  */
 
 import type {
   LineSubtype,
   MarkerSubtype,
-  RoadCurb,
-  RoadDirection,
-  RoadMarkings,
-  RoadStyle,
-  RoadSurface,
   SicroLineObject,
   SicroMarkerObject,
   SicroMeasurementObject,
   SicroPoint,
-  SicroRoadObject,
-  SicroRoundaboutObject,
   SicroTextObject,
   SicroVehicleObject,
   VehicleBodyType,
 } from "./schema";
+import type { SicroParityObject } from "./road-parity/types";
 
 const OBJECT_LAYER = "layer_objects";
 
@@ -238,203 +237,6 @@ export function makeText(p: SicroPoint, text = "Anotação"): SicroTextObject {
   };
 }
 
-// ---------------------------------------------------------------------------
-// MVP 9 Road Engine Pro — `SicroRoadObject` factory + style presets.
-//
-// Each preset bundles the parameters the renderer needs to draw a
-// road end-to-end: paved width, lane count, default markings, curb,
-// surface fill and a sensible spline tension. The user can tweak any
-// of these from the InspectorPanel.
-//
-// Width values are in canvas pixels at zoom 1. They follow the same
-// 18 px/m convention used by VEHICLE_DIMENSIONS, so a 4-lane avenue
-// (~14m of paved area) reads as ~140 px.
-
-export const ROAD_STYLES: Record<
-  RoadStyle,
-  {
-    width: number;
-    lane_count: number;
-    direction: RoadDirection;
-    markings: RoadMarkings;
-    curb: RoadCurb;
-    surface: RoadSurface;
-    spline_tension: number;
-  }
-> = {
-  urban: {
-    width: 80,
-    lane_count: 2,
-    direction: "two_way",
-    markings: {
-      center_line: "dashed",
-      edge_line: true,
-      lane_dividers: false,
-    },
-    curb: { enabled: true, width: 2, color: "#475569" },
-    surface: { fill: "#3f3f46", texture: "none" },
-    spline_tension: 0.5,
-  },
-  avenue: {
-    width: 140,
-    lane_count: 4,
-    direction: "two_way",
-    markings: {
-      center_line: "double_solid",
-      edge_line: true,
-      lane_dividers: true,
-    },
-    curb: { enabled: true, width: 3, color: "#475569" },
-    surface: { fill: "#3f3f46", texture: "none" },
-    spline_tension: 0.5,
-  },
-  highway: {
-    width: 180,
-    lane_count: 4,
-    direction: "two_way",
-    markings: {
-      center_line: "solid",
-      edge_line: true,
-      lane_dividers: true,
-    },
-    curb: { enabled: false, width: 0, color: "#475569" },
-    surface: { fill: "#27272a", texture: "none" },
-    spline_tension: 0.6,
-  },
-  dirt: {
-    width: 60,
-    lane_count: 1,
-    direction: "two_way",
-    markings: {
-      center_line: "none",
-      edge_line: false,
-      lane_dividers: false,
-    },
-    curb: { enabled: false, width: 0, color: "#a8a29e" },
-    surface: { fill: "#a8a29e", texture: "none" },
-    spline_tension: 0.5,
-  },
-  parking: {
-    width: 120,
-    lane_count: 1,
-    direction: "unknown",
-    markings: {
-      center_line: "none",
-      edge_line: true,
-      lane_dividers: false,
-    },
-    curb: { enabled: true, width: 2, color: "#52525b" },
-    surface: { fill: "#52525b", texture: "none" },
-    spline_tension: 0,
-  },
-  custom: {
-    width: 80,
-    lane_count: 2,
-    direction: "two_way",
-    markings: {
-      center_line: "dashed",
-      edge_line: true,
-      lane_dividers: false,
-    },
-    curb: { enabled: false, width: 0, color: "#475569" },
-    surface: { fill: "#3f3f46", texture: "none" },
-    spline_tension: 0.5,
-  },
-};
-
-/**
- * Create a SicroRoadObject from a centerline and (optionally) a style
- * preset. The caller can override any field — for example to bump the
- * lane count or to mark this segment as `subtype: "intersection"`.
- */
-export function makeRoad(
-  points: number[],
-  road_style: RoadStyle = "urban",
-  overrides: Partial<SicroRoadObject> = {},
-): SicroRoadObject {
-  const preset = ROAD_STYLES[road_style];
-  return {
-    id: uid("road"),
-    layer_id: OBJECT_LAYER,
-    kind: "road",
-    subtype: "spline",
-    points,
-    width: preset.width,
-    lane_count: preset.lane_count,
-    direction: preset.direction,
-    road_style,
-    markings: { ...preset.markings },
-    curb: { ...preset.curb },
-    surface: { ...preset.surface },
-    spline_tension: preset.spline_tension,
-    visible: true,
-    locked: false,
-    category: "vias",
-    ...overrides,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Road Engine 2.0 Ciclo 2 — Rotatória primitiva.
-//
-// Defaults: anel de 80 px de raio externo + 14 px de largura → ilha de
-// 66 px de raio. Suficiente para uma rotatória "padrão" cidade pequena
-// (~28 m de diâmetro a 18 px/m). O perito reescala depois.
-//
-// `surface.fill` segue o estilo `urban` (asfalto cinza escuro). `curb`
-// fica desabilitado por default — habilitar adiciona um anel colorido
-// externo ao asfalto (rebaixamento típico de praça central).
-
-/**
- * Default radius / width used when nothing is supplied.
- *
- * Ciclo 2 v6 — defaults proporcionais melhores. Premissa: rotatória
- * "urbana padrão" para via urbana de 80 px (~4,4 m a 18 px/m).
- *
- *   - `r = 144`  (≈ 16 m de diâmetro a 18 px/m — mini-rotatória)
- *   - `width = 56` (faixa de circulação ~3 m — passagem de carro)
- *   - inner radius implícito = 88 px (≈ 10 m — ilha confortável)
- *
- * Mesmo cálculo que o `computeAutoDimensions(roads: [80px])` em
- * `roundaboutNode.ts`. Os defaults aqui são para o caso "rotatória
- * inserida sem vias conectadas" — o perito ainda pode mexer no
- * Inspector, e quando ligar vias e clicar "Recalcular proporção" a
- * rotatória se re-dimensiona.
- */
-const ROUNDABOUT_DEFAULTS = {
-  r: 144,
-  width: 56,
-  lane_count: 1,
-  surface_fill: "#3f3f46",
-  inner_color: "#e5e7eb",
-  border_color: "#f5f5f5",
-};
-
-export function makeRoundabout(
-  p: SicroPoint,
-  label = "R1",
-  overrides: Partial<SicroRoundaboutObject> = {},
-): SicroRoundaboutObject {
-  return {
-    id: uid("roundabout"),
-    layer_id: OBJECT_LAYER,
-    kind: "roundabout",
-    cx: p.x,
-    cy: p.y,
-    r: ROUNDABOUT_DEFAULTS.r,
-    width: ROUNDABOUT_DEFAULTS.width,
-    lane_count: ROUNDABOUT_DEFAULTS.lane_count,
-    surface: { fill: ROUNDABOUT_DEFAULTS.surface_fill, texture: "none" },
-    inner_color: ROUNDABOUT_DEFAULTS.inner_color,
-    border_color: ROUNDABOUT_DEFAULTS.border_color,
-    label,
-    visible: true,
-    locked: false,
-    category: "vias",
-    ...overrides,
-  };
-}
-
 export function makeMeasurement(
   p1: SicroPoint,
   p2: SicroPoint,
@@ -452,14 +254,21 @@ export function makeMeasurement(
   };
 }
 
-/** Clone an object with a new id (Ctrl+D / duplicate). */
+/**
+ * Clone an object with a new id (Ctrl+D / duplicate).
+ *
+ * Fase S — agora aceita também os tipos parity (`road_parity`,
+ * `roundabout_parity`); o offset de 16 px aplica em coordenadas
+ * de mundo (metros) — efetivamente um deslocamento sub-pixel quando
+ * `px_per_m` está em torno de 10. Para um clone que se distinga
+ * visualmente, o caller deve adicionar offset adicional. (TODO Fase S+1)
+ */
 export function cloneObject<T extends SicroVehicleObject
   | SicroLineObject
   | SicroMarkerObject
   | SicroTextObject
   | SicroMeasurementObject
-  | SicroRoadObject
-  | SicroRoundaboutObject>(source: T): T {
+  | SicroParityObject>(source: T): T {
   const cloned = { ...source } as T;
   cloned.id = uid(source.kind);
   // Nudge so the duplicate doesn't overlap the source visually.
@@ -474,22 +283,27 @@ export function cloneObject<T extends SicroVehicleObject
       ? source.points.map((v, i) => v + (i % 2 === 0 ? 16 : 16))
       : cloned.points;
   }
-  if (cloned.kind === "road") {
-    cloned.points = source.kind === "road"
-      ? source.points.map((v) => v + 16)
-      : cloned.points;
-  }
-  if (cloned.kind === "roundabout") {
-    if (source.kind === "roundabout") {
-      cloned.cx = source.cx + 16;
-      cloned.cy = source.cy + 16;
-    }
-  }
   if (cloned.kind === "measurement") {
     if (source.kind === "measurement") {
       cloned.p1 = { x: source.p1.x + 16, y: source.p1.y + 16 };
       cloned.p2 = { x: source.p2.x + 16, y: source.p2.y + 16 };
     }
+  }
+  // Parity road — desloca todos os pontos de controle.
+  if (cloned.kind === "road_parity" && source.kind === "road_parity") {
+    cloned.ax = source.ax + 1;
+    cloned.ay = source.ay + 1;
+    cloned.bx = source.bx + 1;
+    cloned.by = source.by + 1;
+    cloned.cx1 = source.cx1 + 1;
+    cloned.cy1 = source.cy1 + 1;
+    cloned.cx2 = source.cx2 + 1;
+    cloned.cy2 = source.cy2 + 1;
+  }
+  // Parity roundabout — desloca o centro.
+  if (cloned.kind === "roundabout_parity" && source.kind === "roundabout_parity") {
+    cloned.cx = source.cx + 1;
+    cloned.cy = source.cy + 1;
   }
   return cloned;
 }

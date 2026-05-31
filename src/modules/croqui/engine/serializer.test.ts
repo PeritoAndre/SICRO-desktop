@@ -228,8 +228,11 @@ describe("serializeCroquiDoc", () => {
     expect(reparsed.background_image?.locked).toBe(false);
   });
 
-  // MVP 10 Round 5 — closed_path + markings.color additive fields.
-  it("legacy road object (no closed_path / markings.color) loads unchanged", () => {
+  // Fase S clean cut — Road v1/v2 (`kind: "road"`, `kind: "roundabout"`)
+  // são silenciosamente descartados pelo coercer. Croquis pré-S perdem
+  // essas primitivas; o único motor de via passa a ser Python Parity
+  // Engine (`kind: "road_parity"` / `kind: "roundabout_parity"`).
+  it("silently drops legacy v1 road objects (clean cut)", () => {
     const d = coerceCroquiDoc({
       ...VALID_MINIMUM,
       objects: [
@@ -240,60 +243,73 @@ describe("serializeCroquiDoc", () => {
           subtype: "spline",
           points: [0, 0, 100, 0],
           width: 80,
-          lane_count: 2,
-          direction: "two_way",
-          road_style: "urban",
-          markings: {
-            center_line: "dashed",
-            edge_line: true,
-            lane_dividers: false,
-          },
-          curb: { enabled: true, width: 2, color: "#475569" },
-          surface: { fill: "#3f3f46" },
-          spline_tension: 0.5,
+        },
+        {
+          id: "v1",
+          layer_id: "layer_objects",
+          kind: "vehicle",
+          x: 10,
+          y: 20,
+          width: 80,
+          height: 40,
+          rotation: 0,
         },
       ],
     });
-    const road = d.objects[0]!;
-    if (road.kind !== "road") throw new Error("expected road");
-    expect(road.closed_path).toBeUndefined();
-    expect(road.markings.color).toBeUndefined();
+    // O `road` é descartado; o `vehicle` sobrevive.
+    expect(d.objects).toHaveLength(1);
+    expect(d.objects[0]?.kind).toBe("vehicle");
   });
 
-  it("preserves closed_path and markings.color through coerce + stringify + reparse", () => {
-    const stamped = serializeCroquiDoc(
-      coerceCroquiDoc({
-        ...VALID_MINIMUM,
-        objects: [
-          {
-            id: "r1",
-            layer_id: "layer_objects",
-            kind: "road",
-            subtype: "osm_way",
-            points: [0, 0, 50, 50, 0, 100, 0, 0],
-            width: 180,
-            lane_count: 4,
-            direction: "unknown",
-            road_style: "highway",
-            markings: {
-              center_line: "none",
-              edge_line: true,
-              lane_dividers: false,
-              color: "yellow",
-            },
-            curb: { enabled: false, width: 0, color: "#475569" },
-            surface: { fill: "#27272a" },
-            spline_tension: 0.7,
-            closed_path: true,
-          },
-        ],
-      }),
-    );
-    const re = coerceCroquiDoc(JSON.parse(JSON.stringify(stamped)));
-    const road = re.objects[0]!;
-    if (road.kind !== "road") throw new Error("expected road");
-    expect(road.closed_path).toBe(true);
-    expect(road.markings.color).toBe("yellow");
+  it("silently drops legacy v1 roundabout objects (clean cut)", () => {
+    const d = coerceCroquiDoc({
+      ...VALID_MINIMUM,
+      objects: [
+        {
+          id: "rb1",
+          layer_id: "layer_objects",
+          kind: "roundabout",
+          cx: 100,
+          cy: 100,
+          r: 80,
+          width: 14,
+        },
+      ],
+    });
+    expect(d.objects).toHaveLength(0);
+  });
+
+  it("accepts parity road objects through the coercer", () => {
+    const d = coerceCroquiDoc({
+      ...VALID_MINIMUM,
+      objects: [
+        {
+          id: "rdp1",
+          layer_id: "layer_objects",
+          kind: "road_parity",
+          engine: "parity",
+          ax: 0,
+          ay: 0,
+          bx: 100,
+          by: 0,
+          cx1: 33,
+          cy1: 0,
+          cx2: 66,
+          cy2: 0,
+          largura_m: 7.0,
+          superficie: "asfalto",
+          mao_dupla: true,
+          marcacao: "amarela",
+          visible: true,
+          locked: false,
+          label: null,
+          metadata_json: null,
+          category: "vias",
+        },
+      ],
+    });
+    expect(d.objects).toHaveLength(1);
+    expect(d.objects[0]?.kind).toBe("road_parity");
   });
 
   it("drops invalid background_image (no source_path) without crashing", () => {

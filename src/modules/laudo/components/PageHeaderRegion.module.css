@@ -6,7 +6,13 @@
   position: absolute;
   box-sizing: border-box;
   z-index: 3;
-  overflow: hidden;
+  /* Pós-laudo U — overflow visível pra TextBoxes e Figures dentro do
+   * header poderem extender pra fora da altura nominal. Caso de uso
+   * canônico: texto vertical lateral "POLÍCIA CIENTÍFICA DO ESTADO DO
+   * AMAPÁ" + logo no canto inferior esquerdo, que faz parte do
+   * cabeçalho (replica em cada página) mas ocupa a altura inteira
+   * da folha. */
+  overflow: visible;
   user-select: text;
   /* Borda tracejada na parte de baixo separa o cabeçalho do corpo. */
   border-bottom: 1px dashed #c2c8d2;
@@ -46,12 +52,17 @@
   outline: none;
 }
 .editorHost :global(.ProseMirror p) {
-  margin: 0 0 0.2em 0;
-  line-height: 1.3;
+  /* Tight Word-like stacking: zero paragraph spacing + line-height
+   * próximo do "Simples" do Word (~1.15). Antes usávamos 1.3 com
+   * 0.2em de margin-bottom, o que somava ~0.5em a mais por parágrafo
+   * comparado ao Word. As brand lines do cabeçalho oficial precisam
+   * ficar coladas como bloco — sem respiro extra entre linhas. */
+  margin: 0;
+  line-height: 1.15;
   /* N18 — Garante altura mínima para parágrafos vazios (enters que o
    * user usa pra empurrar o conteúdo verticalmente). Sem isso, um
    * <p></p> colapsa para 0px no Chromium/Edge. */
-  min-height: 1.3em;
+  min-height: 1.15em;
 }
 .editorHost :global(.ProseMirror p.is-editor-empty:first-child::before) {
   /* Placeholder visual quando o header está vazio. */
@@ -68,14 +79,27 @@
 .cloneHost {
   width: 100%;
   height: 100%;
-  overflow: hidden;
+  /* Pós-laudo U — espelha o overflow:visible da .region pra que TextBoxes
+   * absolutas dentro do clone HTML estático (páginas 2+) também
+   * extendam pra fora do header nas réplicas. */
+  overflow: visible;
+  /* Pós-laudo U fix — `position: relative` torna o cloneHost o
+   * offsetParent das textboxes absolutas que rolam dentro dele.
+   * Sem isso, o offsetParent caía na `.region` (que tem `padding-left`
+   * = margem do laudo), e a textbox em body mode renderizava ~2cm
+   * mais pra esquerda do que em header mode (onde o `.ProseMirror`
+   * default do PM tem `position: relative` e funciona como
+   * offsetParent). Agora as coordenadas batem nos dois modos. */
+  position: relative;
 }
 .cloneHost p {
-  margin: 0 0 0.2em 0;
-  line-height: 1.3;
+  /* Espelha o editorHost: stacking justo (1.15) sem margin entre
+   * parágrafos, replicando o look "Simples" do Word no cabeçalho. */
+  margin: 0;
+  line-height: 1.15;
   /* N18 — Mesma razão do editorHost: <p></p> vazio (enter sem texto)
    * tem que reservar altura pra refletir o que o user vê no editor. */
-  min-height: 1.3em;
+  min-height: 1.15em;
 }
 .cloneHost img {
   max-height: 100%;

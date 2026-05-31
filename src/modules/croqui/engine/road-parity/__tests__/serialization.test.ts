@@ -4,9 +4,11 @@
  * Garantia: objetos parity sobrevivem round-trip
  * `JSON.stringify` → `JSON.parse` + `coerceCroquiDoc` sem perda.
  *
- * Foco: o coercer NÃO toca em `parity_objects` (porque elas vivem
- * em array separado). E `road_engine_version: "parity"` deve ser
- * preservado.
+ * Fase S clean cut — Os objetos parity agora vivem no array principal
+ * `doc.objects` (via union `SicroObject`). Os campos legacy
+ * `road_engine_version` e `parity_objects` foram removidos do envelope
+ * — quando o coercer encontra um envelope antigo que ainda carrega
+ * `parity_objects`, absorve esses objetos no array principal.
  */
 
 import { describe, expect, it } from "vitest";
@@ -39,9 +41,7 @@ function buildDocWithParity(parity: SicroParityObject[]): SicroCroquiDoc {
         kind: "objects",
       },
     ],
-    objects: [],
-    road_engine_version: "parity",
-    parity_objects: parity,
+    objects: parity,
   };
 }
 
@@ -58,12 +58,9 @@ describe("road-parity / serializer round-trip", () => {
     const stamped = serializeCroquiDoc(doc);
     const reparsed = coerceCroquiDoc(JSON.parse(JSON.stringify(stamped)));
 
-    expect(reparsed.road_engine_version).toBe("parity");
-    // O coercer atual NÃO mexe em `parity_objects` — passa direto
-    // através do spread. Verificamos isso explicitamente.
-    expect(reparsed.parity_objects).toBeDefined();
-    expect(reparsed.parity_objects).toHaveLength(1);
-    const r = reparsed.parity_objects?.[0];
+    // Parity objects vivem no array `objects` principal agora.
+    expect(reparsed.objects).toHaveLength(1);
+    const r = reparsed.objects[0];
     expect(r).toBeDefined();
     expect(r?.kind).toBe("road_parity");
     if (r && r.kind === "road_parity") {
@@ -88,7 +85,7 @@ describe("road-parity / serializer round-trip", () => {
     const stamped = serializeCroquiDoc(doc);
     const reparsed = coerceCroquiDoc(JSON.parse(JSON.stringify(stamped)));
 
-    const r = reparsed.parity_objects?.[0];
+    const r = reparsed.objects[0];
     expect(r?.kind).toBe("roundabout_parity");
     if (r && r.kind === "roundabout_parity") {
       expect(r.cx).toBe(50);
@@ -106,7 +103,7 @@ describe("road-parity / serializer round-trip", () => {
     const reparsed = coerceCroquiDoc(
       JSON.parse(JSON.stringify(serializeCroquiDoc(doc))),
     );
-    const r = reparsed.parity_objects?.[0];
+    const r = reparsed.objects[0];
     if (r && r.kind === "roundabout_parity") {
       expect(r.inner_color).toBeUndefined();
     } else {
@@ -114,28 +111,22 @@ describe("road-parity / serializer round-trip", () => {
     }
   });
 
-  it("road_engine_version 'parity' aceito pelo coercer", () => {
-    const doc = buildDocWithParity([]);
-    const reparsed = coerceCroquiDoc(JSON.parse(JSON.stringify(doc)));
-    expect(reparsed.road_engine_version).toBe("parity");
-  });
-
-  it("road_engine_version 'invalid' cai pra 'v1'", () => {
-    const doc = {
-      ...buildDocWithParity([]),
-      road_engine_version: "invalid_xxx" as never,
+  it("absorve `parity_objects` legacy do envelope pré-Fase S", () => {
+    // Envelope antigo (Fase H.1) carregava `parity_objects` separado.
+    // O coercer agora copia eles para o array `objects` principal.
+    const road = makeParityRoad(0, 0, 100, 0);
+    const legacyEnvelope = {
+      schema_version: "0.3",
+      croqui_id: "11111111-1111-4111-8111-111111111111",
+      occurrence_id: "22222222-2222-4222-8222-222222222222",
+      title: "Doc legado",
+      created_at: "2026-05-26T00:00:00.000Z",
+      updated_at: "2026-05-26T00:00:00.000Z",
+      objects: [],
+      parity_objects: [road],
     };
-    const reparsed = coerceCroquiDoc(JSON.parse(JSON.stringify(doc)));
-    expect(reparsed.road_engine_version).toBe("v1");
-  });
-
-  it("doc sem parity_objects mas com road_engine_version 'parity' não crasha", () => {
-    const doc: SicroCroquiDoc = {
-      ...buildDocWithParity([]),
-    };
-    delete doc.parity_objects;
-    const reparsed = coerceCroquiDoc(JSON.parse(JSON.stringify(doc)));
-    expect(reparsed.road_engine_version).toBe("parity");
-    expect(reparsed.parity_objects).toBeUndefined();
+    const reparsed = coerceCroquiDoc(legacyEnvelope);
+    expect(reparsed.objects).toHaveLength(1);
+    expect(reparsed.objects[0]?.kind).toBe("road_parity");
   });
 });

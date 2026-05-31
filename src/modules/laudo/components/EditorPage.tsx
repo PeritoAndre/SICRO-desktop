@@ -840,10 +840,25 @@ export function EditorPage({
                 onActivate={activateHeader}
                 onHeightChange={(cm) => {
                   if (!onLayoutChange) return;
-                  // N17 — Auto-expande margin.top quando o header passa
-                  // dela (modelo Word). NÃO encolhe automaticamente quando
-                  // o header reduz — o user controla a margem via régua.
-                  if (cm > margins.top + 0.005) {
+                  // N17 — Auto-acoplamento margin.top ↔ header_height_cm.
+                  // Versão simétrica (pós-laudo T):
+                  //   - Header CRESCE além da margem → margin cresce junto
+                  //     (igual antes, "modelo Word").
+                  //   - Header ENCOLHE com margin sincronizada → margin
+                  //     encolhe junto. Antes só crescia, então uma vez que
+                  //     o user expandia pra 10cm não conseguia mais voltar
+                  //     o body pra cima (a linha demarcadora ia, mas a
+                  //     margem ficava grudada no max já atingido).
+                  //   - Header ENCOLHE com margin manual MAIOR (gap
+                  //     deliberado) → margin é PRESERVADA. O user manteve
+                  //     um gap entre header e body via Inspector → respeita.
+                  //
+                  // "Sincronizada" = margins.top ≈ headerHeightCm atual.
+                  const wasSynced =
+                    Math.abs(margins.top - headerHeightCm) < 0.01;
+                  const shouldSyncMargin =
+                    cm > margins.top + 0.005 || wasSynced;
+                  if (shouldSyncMargin) {
                     onLayoutChange({
                       header_height_cm: cm,
                       page: {

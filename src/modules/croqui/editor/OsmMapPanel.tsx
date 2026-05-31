@@ -43,6 +43,7 @@ import {
   useState,
 } from "react";
 import {
+  Circle,
   CircleMarker,
   MapContainer,
   Marker,
@@ -145,7 +146,7 @@ export function OsmMapPanel({
           key={refreshNonce}
           onReady={() => setMapReady(true)}
         />
-        <CentreSync centre={centre} />
+        <CentreSync centre={centre} radius={radius} />
         <MapClickHandler
           onClick={(latlng) =>
             onMapPick({ lat: latlng.lat, lon: latlng.lng })
@@ -159,14 +160,34 @@ export function OsmMapPanel({
             >
               <Popup>Centro do sinistro</Popup>
             </Marker>
-            <CircleMarker
+            {/* Círculo do raio — usa `Circle` (raio em METROS geográficos)
+                ao invés do `CircleMarker` (que usa pixels). Assim o
+                círculo cresce/diminui com o zoom do mapa e sempre
+                representa visualmente o raio real selecionado.
+                Hard-cap do clip de importação. */}
+            <Circle
               center={[centre.lat, centre.lon]}
-              radius={Math.max(30, Math.sqrt(radius) * 3)}
+              radius={radius}
               pathOptions={{
                 color: "#5aa9e6",
                 fillColor: "#5aa9e6",
-                fillOpacity: 0.1,
-                weight: 1,
+                fillOpacity: 0.12,
+                weight: 2,
+                dashArray: "6 4",
+              }}
+            />
+            {/* Pino central pequeno (CircleMarker — pixels fixos) por
+                cima do `Circle` pra deixar a posição exata visível
+                mesmo em zoom alto, quando o `Circle` ocupa toda a
+                tela. */}
+            <CircleMarker
+              center={[centre.lat, centre.lon]}
+              radius={4}
+              pathOptions={{
+                color: "#5aa9e6",
+                fillColor: "#5aa9e6",
+                fillOpacity: 0.9,
+                weight: 0,
               }}
             />
           </>
@@ -332,14 +353,26 @@ function MapInvalidator({ onReady }: { onReady: () => void }) {
   return null;
 }
 
-function CentreSync({ centre }: { centre: LatLon | null }) {
+function CentreSync({
+  centre,
+  radius,
+}: {
+  centre: LatLon | null;
+  radius: number;
+}) {
   const map = useMap();
-  // Stable ref to the latest centre value — the effect only re-runs
-  // when the actual lat/lon changes, never just because of identity.
+  // Effect re-runs quando o centro ou o raio muda — fitBounds enquadra
+  // o círculo do raio com uma pequena margem (1.4x para deixar
+  // respiração visual).
   useEffect(() => {
     if (!centre) return;
-    map.flyTo([centre.lat, centre.lon], map.getZoom(), { duration: 0.3 });
-  }, [centre, map]);
+    // Cria bounds com extensão de ~1.4x do raio em torno do centro.
+    // L.LatLng.toBounds(meters) gera um quadrado de lado 2 * meters.
+    const padded = radius * 1.4;
+    const ll = L.latLng(centre.lat, centre.lon);
+    const bounds = ll.toBounds(padded * 2);
+    map.flyToBounds(bounds, { duration: 0.3, maxZoom: 19 });
+  }, [centre, radius, map]);
   return null;
 }
 

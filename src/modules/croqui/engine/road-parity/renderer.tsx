@@ -22,6 +22,7 @@ import {
   buildRoadSidewalk,
   buildRoundaboutDiskPolygon,
   buildRoundaboutRings,
+  discretizeCircle,
   flattenVec2,
   projectWorldPoints,
   resolvePxPerM,
@@ -206,8 +207,15 @@ export function RoadParityRenderer({
     () => meshes.map((m) => m.asphaltPolyWorld),
     [meshes],
   );
+  // Discos das rotatórias usados como obstáculos para clipping das
+  // bordas das vias. Sem padding — as bordas das vias devem parar
+  // EXATAMENTE no raio externo do anel, encontrando a borda circular
+  // branca da rotatória. Quaisquer pontos tangentes que escapem do
+  // clipping são cobertos pelo PASS 3b (overlay de asfalto da
+  // rotatória), portanto não há risco de vazamento visual.
   const allRoundaboutDisks = useMemo(
-    () => roundabouts.map((rb) => buildRoundaboutDiskPolygon(rb)),
+    () =>
+      roundabouts.map((rb) => buildRoundaboutDiskPolygon(rb, 96, 0)),
     [roundabouts],
   );
 
@@ -389,33 +397,157 @@ export function RoadParityRenderer({
             return <Group key={`pp3_${m.road.id}`}>{elements}</Group>;
           })}
 
-        {/* Bordas das rotatórias. */}
+        {/* Pass 3b — Repinta o anel ASFALTO + ilha verde POR CIMA das
+            marcações das vias. Garante que bordas / eixos centrais das
+            vias que cruzaram dentro do disco da rotatória sejam
+            cobertos. Em vez de desenhar um donut (Shape com sceneFunc),
+            usamos dois <Circle> simples: o externo cobre tudo, o
+            interno restaura a ilha por cima. Z-order natural do
+            react-konva resolve. */}
         {roundabouts
           .filter((rb) => rb.visible !== false)
           .map((rb) => {
             const rings = buildRoundaboutRings(rb, effectivePxPerM);
+            const cxPx = rings.cx_px + offsetX;
+            const cyPx = rings.cy_px + offsetY;
+            const islandColor = rb.inner_color ?? PARITY_COLORS.islandDefault;
             return (
-              <Group key={`pp3_rb_${rb.id}`}>
+              <Group key={`pp3_rb_overlay_${rb.id}`} listening={false}>
                 <Circle
-                  x={rings.cx_px + offsetX}
-                  y={rings.cy_px + offsetY}
-                  radius={rings.outer_r_px}
-                  stroke={PARITY_COLORS.edge}
-                  strokeWidth={PARITY_STROKE_WIDTHS.edgeLine}
-                  fillEnabled={false}
-                  listening={false}
+                  x={cxPx}
+                  y={cyPx}
+                  radius={rings.outer_r_px + 0.5}
+                  fill={PARITY_COLORS.asphalt}
                 />
                 {rings.inner_r_px >= 1 && (
                   <Circle
-                    x={rings.cx_px + offsetX}
-                    y={rings.cy_px + offsetY}
+                    x={cxPx}
+                    y={cyPx}
                     radius={rings.inner_r_px}
-                    stroke={PARITY_COLORS.edge}
-                    strokeWidth={PARITY_STROKE_WIDTHS.edgeLine}
-                    fillEnabled={false}
-                    listening={false}
+                    fill={islandColor}
                   />
                 )}
+              </Group>
+            );
+          })}
+
+        {/* Bordas + eixo central das rotatórias — clipping GEOMÉTRICO
+            REAL contra os polígonos de asfalto das vias. Onde o
+            asfalto da via cruza o anel, a borda do anel é cortada
+            EXATAMENTE na borda lateral da via — junções seamless
+            sem heurística angular. */}
+        {roundabouts
+          .filter((rb) => rb.visible !== false)
+          .map((rb) => {
+            const marcacao = rb.marcacao ?? "nenhuma";
+            const showCentralLine = marcacao !== "nenhuma";
+            const centralColor =
+              marcacao === "amarela"
+                ? PARITY_COLORS.yellow
+                : marcacao === "branca"
+                  ? PARITY_COLORS.white
+                  : PARITY_COLORS.edge;
+
+            // Raios em metros (mundo) — clipping é geométrico em
+            // mundo, depois projetamos pra canvas.
+            const halfLargM = rb.largura_m / 2;
+            const outerRm = rb.r_m + halfLargM;
+            const innerRm = Math.max(0, rb.r_m - halfLargM);
+            const midRm = (outerRm + innerRm) / 2;
+
+            // Discretiza os 3 anéis em polylines fechadas (96 vértices).
+            const outerLoop = discretizeCircle(rb.cx, rb.cy, outerRm);
+            const innerLoop = discretizeCircle(rb.cx, rb.cy, innerRm);
+            const midLoop = discretizeCircle(rb.cx, rb.cy, midRm);
+
+            // Clipa contra TODOS os polígonos de asfalto das vias —
+            // os pedaços DENTRO do asfalto da via são descartados.
+            // Resultado: arcos visíveis APENAS onde não há via.
+            const outerClipped = clipPolylineAgainstPolygons(
+              outerLoop,
+              allRoadAsphaltPolys,
+            );
+            const innerClipped = clipPolylineAgainstPolygons(
+              innerLoop,
+              allRoadAsphaltPolys,
+            );
+            const midClipped = showCentralLine
+              ? clipPolylineAgainstPolygons(midLoop, allRoadAsphaltPolys)
+              : { segments: [] as Vec2World[][] };
+
+            return (
+              <Group key={`pp3_rb_${rb.id}`}>
+                {/* Borda externa — arcos sobreviventes do clipping. */}
+                {outerClipped.segments.map((seg, i) => {
+                  const proj = projectWorldPoints(
+                    seg,
+                    effectivePxPerM,
+                    offsetX,
+                    offsetY,
+                  );
+                  if (proj.length < 2) return null;
+                  return (
+                    <Line
+                      key={`pp3_rb_${rb.id}_outer_${i}`}
+                      points={flattenVec2(proj)}
+                      stroke={PARITY_COLORS.edge}
+                      strokeWidth={PARITY_STROKE_WIDTHS.edgeLine}
+                      lineCap="butt"
+                      lineJoin="round"
+                      listening={false}
+                    />
+                  );
+                })}
+                {/* Borda interna — arcos sobreviventes. Em rotatórias
+                    pequenas / largas, vias podem cruzar até esse anel;
+                    o clip cuida. */}
+                {innerRm >= 0.5 &&
+                  innerClipped.segments.map((seg, i) => {
+                    const proj = projectWorldPoints(
+                      seg,
+                      effectivePxPerM,
+                      offsetX,
+                      offsetY,
+                    );
+                    if (proj.length < 2) return null;
+                    return (
+                      <Line
+                        key={`pp3_rb_${rb.id}_inner_${i}`}
+                        points={flattenVec2(proj)}
+                        stroke={PARITY_COLORS.edge}
+                        strokeWidth={PARITY_STROKE_WIDTHS.edgeLine}
+                        lineCap="butt"
+                        lineJoin="round"
+                        listening={false}
+                      />
+                    );
+                  })}
+                {/* Eixo central tracejado — também clipado. */}
+                {showCentralLine &&
+                  midRm >= 0.5 &&
+                  midClipped.segments.map((seg, i) => {
+                    const proj = projectWorldPoints(
+                      seg,
+                      effectivePxPerM,
+                      offsetX,
+                      offsetY,
+                    );
+                    if (proj.length < 2) return null;
+                    return (
+                      <Line
+                        key={`pp3_rb_${rb.id}_center_${i}`}
+                        points={flattenVec2(proj)}
+                        stroke={centralColor}
+                        strokeWidth={PARITY_STROKE_WIDTHS.centerLine}
+                        dash={[
+                          PARITY_CENTER_LINE_DASH[0],
+                          PARITY_CENTER_LINE_DASH[1],
+                        ]}
+                        lineCap="butt"
+                        listening={false}
+                      />
+                    );
+                  })}
               </Group>
             );
           })}

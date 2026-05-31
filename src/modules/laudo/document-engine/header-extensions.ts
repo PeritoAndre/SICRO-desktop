@@ -52,6 +52,8 @@ import { FontSize } from "./marks/FontSize";
 // recebam o mesmo tratamento (overlay, handles, wrap modes) que as
 // fotos do corpo.
 import { Figure, FigCaption } from "./nodes/Figure";
+// U — TextBox: caixa de texto editável também disponível no cabeçalho.
+import { TextBox } from "./nodes/TextBox";
 import { ParagraphFirstLineIndent } from "./paragraph-indent";
 import { ParagraphSpacing } from "./paragraph-spacing";
 
@@ -100,6 +102,8 @@ export function headerExtensions(
     // Pós-laudo S — Figure + FigCaption + paragraph helpers no header.
     Figure,
     FigCaption,
+    // U — TextBox no header também (mesmo tratamento que no body).
+    TextBox,
     ParagraphFirstLineIndent,
     ParagraphSpacing,
     Placeholder.configure({

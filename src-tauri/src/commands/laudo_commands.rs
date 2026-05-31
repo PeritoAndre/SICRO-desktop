@@ -51,7 +51,7 @@ pub async fn create_laudo(
             input.title.trim().to_string()
         },
         template_id: if input.template_id.trim().is_empty() {
-            "documento_livre".to_string()
+            "documento_em_branco".to_string()
         } else {
             input.template_id.trim().to_string()
         },
@@ -145,6 +145,59 @@ pub async fn read_laudo(workspace_path: String, laudo_id: String) -> Result<Laud
     let doc: serde_json::Value = serde_json::from_slice(&bytes)?;
 
     Ok(LaudoDoc { laudo, doc })
+}
+
+/// Remove o laudo do workspace: apaga a linha do SQLite e remove o
+/// arquivo `.sicrodoc` em disco. Idempotente em relação ao arquivo —
+/// se ele já não existe, a operação segue (o usuário não deve ser
+/// penalizado por arquivo já apagado externamente).
+///
+/// Audit: grava `laudo.deleted` em `occurrence_audit` antes de remover
+/// a linha do laudo para preservar a rastreabilidade.
+#[tauri::command]
+pub async fn delete_laudo(
+    workspace_path: String,
+    laudo_id: String,
+) -> Result<()> {
+    let ws = PathBuf::from(&workspace_path);
+    let id = Uuid::parse_str(&laudo_id)
+        .map_err(|e| SicroError::Validation(format!("invalid laudo id: {e}")))?;
+
+    let mut conn = open_connection(&ws.join(SQLITE_FILENAME))?;
+    run_migrations(&mut conn)?;
+
+    let laudo = laudo_repo::find_by_id(&conn, &id)?
+        .ok_or_else(|| SicroError::Validation(format!("laudo {} not found", id)))?;
+
+    // Audit primeiro (enquanto o laudo ainda existe na tabela), depois
+    // remove a linha. O record_audit referencia o id do laudo, então
+    // se a ordem inverter o FK não vai estourar — mas mantemos a
+    // sequência clara para futuro hardening do schema.
+    occurrence_repo::record_audit(
+        &conn,
+        Some(&laudo.occurrence_id),
+        "laudo.deleted",
+        Some("laudo"),
+        Some("laudo"),
+        Some(&laudo.id),
+        Some(&laudo.relative_path),
+    )?;
+
+    laudo_repo::delete(&conn, &id)?;
+
+    // Apaga o .sicrodoc do disco. NotFound é silencioso para tornar
+    // a operação idempotente (se o usuário deletou o arquivo
+    // manualmente, o command ainda completa com sucesso).
+    let target = ws.join(&laudo.relative_path);
+    match std::fs::remove_file(&target) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(SicroError::Filesystem(format!(
+            "could not delete laudo file at {}: {}",
+            target.display(),
+            e
+        ))),
+    }
 }
 
 #[tauri::command]

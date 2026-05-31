@@ -11,7 +11,8 @@
  *   - everything we don't trust the player for (metadata, frame
  *     extraction) goes through Rust+ffmpeg, as the lab decided.
  *
- * Known limits surfaced in `SPIKE_F_*.md`: AVI / MKV with unusual codecs
+ * Known limits surfaced in `docs/archive/SPIKE_F_VIDEO_ENGINE_RELATORIO.md`:
+ * AVI / MKV with unusual codecs
  * may NOT play. The status bar shows the player's `error` event with a
  * clear message if that happens.
  */

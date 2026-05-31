@@ -43,6 +43,13 @@ interface CroquiState {
     workspacePath: string,
     doc: SicroCroquiDoc,
   ) => Promise<Croqui>;
+  /**
+   * Remove o croqui do workspace (linha + `.sicrocroqui`). Tira o
+   * item da `list` em memória; se for o croqui aberto no editor,
+   * limpa o `activeCroqui`/`activeDoc` para o caller voltar pra
+   * lista. PNGs já exportados não são apagados.
+   */
+  deleteCroqui: (workspacePath: string, croquiId: string) => Promise<void>;
   exportPng: (
     workspacePath: string,
     pngBase64: string,
@@ -132,6 +139,31 @@ export const useCroquiStore = create<CroquiState>((set, get) => ({
         isMutating: false,
       }));
       return updated;
+    } catch (err) {
+      const e = toSicroError(err);
+      set({ isMutating: false, lastError: e });
+      throw e;
+    }
+  },
+
+  async deleteCroqui(workspacePath, croquiId) {
+    set({ isMutating: true, lastError: null });
+    try {
+      await commands.deleteCroqui(workspacePath, croquiId);
+      set((s) => {
+        const wasActive = s.activeCroquiId === croquiId;
+        // Remove o timestamp de export deste id (mantém o map limpo).
+        const remainingExports = { ...s.lastExportedAt };
+        delete remainingExports[croquiId];
+        return {
+          list: s.list.filter((c) => c.id !== croquiId),
+          activeCroquiId: wasActive ? null : s.activeCroquiId,
+          activeCroqui: wasActive ? null : s.activeCroqui,
+          activeDoc: wasActive ? null : s.activeDoc,
+          lastExportedAt: remainingExports,
+          isMutating: false,
+        };
+      });
     } catch (err) {
       const e = toSicroError(err);
       set({ isMutating: false, lastError: e });

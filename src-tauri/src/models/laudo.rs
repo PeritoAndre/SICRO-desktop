@@ -80,7 +80,7 @@ pub struct NewLaudoInput {
 }
 
 fn default_template() -> String {
-    "documento_livre".to_string()
+    "documento_em_branco".to_string()
 }
 
 /// Returned by read/save commands. `doc` is the full `.sicrodoc` payload

@@ -1,5 +1,6 @@
 /**
  * O — Tipos do drag & drop de fotos no editor de laudo.
+ * T — + paste (Ctrl+V) de fotos via clipboard.
  *
  * Espelham 1:1 as structs Rust em `src-tauri/src/commands/laudo_photo_drop.rs`.
  * As `field_names` usam snake_case porque serde-json preserva os nomes
@@ -40,4 +41,18 @@ export interface PhotoImportResult {
   imported: ImportedPhoto[];
   /** Fotos que falharam (extensão não suportada, arquivo não existe, etc). */
   errors: PhotoImportError[];
+}
+
+/**
+ * T — Foto colada do clipboard (Ctrl+V). Bytes em base64 padrão
+ * (sem prefixo `data:`). `filename` é uma sugestão do frontend que
+ * vira o `original_filename` no `ImportedPhoto` retornado.
+ *
+ * Pra screenshot/bitmap raw: invente `pasted-<timestamp>.png`.
+ * Pra arquivo copiado do Explorer entregue como `File` no DataTransfer:
+ * use o `file.name` original.
+ */
+export interface PastedPhotoInput {
+  bytes_base64: string;
+  filename: string;
 }

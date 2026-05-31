@@ -170,6 +170,19 @@ export const commands = {
   },
 
   /**
+   * Remove o laudo do workspace: apaga a linha em `laudos` e o
+   * arquivo `.sicrodoc` em disco. Idempotente para o arquivo
+   * (NotFound é tratado como sucesso). Grava `laudo.deleted` no
+   * audit log antes da remoção.
+   */
+  deleteLaudo(workspacePath: string, laudoId: string): Promise<void> {
+    return safeInvoke<void>("delete_laudo", {
+      workspacePath,
+      laudoId,
+    });
+  },
+
+  /**
    * H — Importa um PDF assinado (gov.br ou SIGDOCS) de volta para o
    * workspace. Grava em `laudos/<id>/assinados/<filename>.pdf`,
    * computa SHA-256 e devolve metadados para o frontend persistir em
@@ -447,6 +460,19 @@ export const commands = {
       workspacePath,
       croquiId,
       doc,
+    });
+  },
+
+  /**
+   * Remove o croqui do workspace: apaga a linha em `croquis` e o
+   * arquivo `.sicrocroqui` em disco. PNGs já exportados em
+   * `croquis/exports/` NÃO são removidos (preservam o histórico
+   * pericial). Grava `croqui.deleted` no audit log.
+   */
+  deleteCroqui(workspacePath: string, croquiId: string): Promise<void> {
+    return safeInvoke<void>("delete_croqui", {
+      workspacePath,
+      croquiId,
     });
   },
 
@@ -765,6 +791,30 @@ export const commands = {
         workspace_path: workspacePath,
         laudo_id: laudoId,
         file_paths: filePaths,
+      },
+    });
+  },
+
+  /**
+   * T — Paste (Ctrl+V) de fotos no editor de laudo. Mesma fundação do
+   * drag&drop, mas as fotos vêm como bytes (base64) em vez de paths.
+   * Cobre dois casos do clipboard:
+   *   1. Bitmap raw (screenshot do Windows, "copy image" do browser).
+   *   2. Arquivo copiado do Explorer entregue como `File` pelo
+   *      `DataTransfer.files` no evento `paste`.
+   *
+   * O command NUNCA aborta o lote: bytes inválidos vão no array `errors`.
+   */
+  importPastedPhotosToLaudo(
+    workspacePath: string,
+    laudoId: string,
+    photos: { bytes_base64: string; filename: string }[],
+  ): Promise<PhotoImportResult> {
+    return safeInvoke<PhotoImportResult>("import_pasted_photos_to_laudo", {
+      input: {
+        workspace_path: workspacePath,
+        laudo_id: laudoId,
+        photos,
       },
     });
   },

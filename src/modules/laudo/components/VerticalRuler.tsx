@@ -15,8 +15,9 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import styles from "./Ruler.module.css";
-import { PX_PER_CM, RULER_THICKNESS } from "./HorizontalRuler";
+import { PX_PER_CM, RULER_THICKNESS, snapCmIf } from "./HorizontalRuler";
 
 interface VerticalRulerProps {
   pageHeightCm: number;
@@ -47,10 +48,17 @@ export function VerticalRuler({
   const totalHeightCm = pageCount * pageHeightCm + (pageCount - 1) * pageGapCm;
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dragPreview, setDragPreview] = useState<{
+  // Overlay visual (linha tracejada HORIZONTAL) durante o drag dos handles
+  // top/bottom. Mesmo padrão dos handles da régua horizontal:
+  //   - Os triângulos ficam parados no lugar durante o drag (sempre lêem
+  //     direto da prop topMarginCm/bottomMarginCm).
+  //   - Uma linha tracejada amber via portal mostra onde a margem vai cair.
+  //   - Linha some no mouseup, prop atualiza, triângulos "saltam" pra
+  //     posição final.
+  const [marginOverlay, setMarginOverlay] = useState<{
     side: "top" | "bottom";
-    pageIndex: number;
-    cm: number;
+    screenY: number;
+    leftPx: number;
   } | null>(null);
 
   // Top y (in stack) onde cada segmento começa, EM CM (consistente com
@@ -60,10 +68,10 @@ export function VerticalRuler({
     segmentTopsCm.push(i * (pageHeightCm + pageGapCm));
   }
 
-  const topMarginEffectiveCm =
-    dragPreview?.side === "top" ? dragPreview.cm : topMarginCm;
-  const bottomMarginEffectiveCm =
-    dragPreview?.side === "bottom" ? dragPreview.cm : bottomMarginCm;
+  // Os handles sempre lêem da prop — não há mais preview-movível. O
+  // feedback visual durante o drag vem da linha tracejada (marginOverlay).
+  const topMarginEffectiveCm = topMarginCm;
+  const bottomMarginEffectiveCm = bottomMarginCm;
 
   const startDrag = (
     e: React.MouseEvent<SVGElement>,
@@ -111,59 +119,73 @@ export function VerticalRuler({
       }
     };
 
-    // F11.4 — Não setar dragPreview no mousedown. Só commit no mouseup
-    // se o user realmente moveu o mouse (didMove = true).
+    // cm (margem) → screen Y absoluto. Usa a altura visual do container
+    // pra respeitar zoom da página (CSS transform).
+    const totalStackCm = pageCount * pageHeightCm + (pageCount - 1) * pageGapCm;
+    const marginToScreenY = (cm: number, s: "top" | "bottom"): number => {
+      const posCmInStack =
+        s === "top"
+          ? pageTopInStackCm + cm
+          : pageTopInStackCm + pageHeightCm - cm;
+      return rect.top + (posCmInStack / totalStackCm) * rect.height;
+    };
+
+    // Linha tracejada horizontal já visível no mousedown.
+    const currentCm = side === "top" ? topMarginCm : bottomMarginCm;
+    setMarginOverlay({
+      side,
+      screenY: marginToScreenY(currentCm, side),
+      leftPx: rect.right, // começa logo à direita da régua vertical
+    });
+
+    // Snap padrão (left only) com toggle livre via botão direito —
+    // mesmo padrão dos handles horizontais.
     let didMove = false;
+    let lastButtons = e.buttons;
 
     const onMove = (ev: MouseEvent) => {
       didMove = true;
-      setDragPreview({ side, pageIndex, cm: compute(ev.clientY) });
+      lastButtons = ev.buttons;
+      const raw = compute(ev.clientY);
+      const next = snapCmIf(raw, (lastButtons & 2) === 0);
+      setMarginOverlay({
+        side,
+        screenY: marginToScreenY(next, side),
+        leftPx: rect.right,
+      });
     };
     const onUp = (ev: MouseEvent) => {
+      if (ev.button !== 0) return;
       if (didMove) {
-        const final = compute(ev.clientY);
+        const raw = compute(ev.clientY);
+        const final = snapCmIf(raw, (lastButtons & 2) === 0);
         if (side === "top") onTopMarginChange?.(final);
         else onBottomMarginChange?.(final);
-        // M7 — mantém dragPreview no valor final até a prop alinhar
-        // (mesma estratégia do HorizontalRuler para evitar flicker
-        // entre o commit e a atualização da prop via store).
-        setDragPreview({ side, pageIndex, cm: final });
-      } else {
-        setDragPreview(null);
       }
+      // Linha some sempre no release — mesmo padrão dos outros handles.
+      setMarginOverlay(null);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      window.removeEventListener("contextmenu", onContextMenu);
     };
+    const onContextMenu = (ev: MouseEvent) => ev.preventDefault();
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    window.addEventListener("contextmenu", onContextMenu);
   };
 
   useEffect(() => {
-    if (!dragPreview) return;
+    if (!marginOverlay) return;
     const prev = document.body.style.cursor;
     document.body.style.cursor = "ns-resize";
     return () => {
       document.body.style.cursor = prev;
     };
-  }, [dragPreview]);
+  }, [marginOverlay]);
 
-  // M7 — Sincroniza dragPreview com a prop depois do commit. Quando a
-  // prop bater (dentro da tolerância), limpa o preview. Quando divergir
-  // (ex: hardcap recuou), atualiza preview pra prop primeiro.
-  useEffect(() => {
-    if (!dragPreview) return;
-    const propValue =
-      dragPreview.side === "top" ? topMarginCm : bottomMarginCm;
-    if (Math.abs(propValue - dragPreview.cm) < 0.005) {
-      setDragPreview(null);
-    } else {
-      setDragPreview({
-        side: dragPreview.side,
-        pageIndex: dragPreview.pageIndex,
-        cm: propValue,
-      });
-    }
-  }, [topMarginCm, bottomMarginCm, dragPreview]);
+  // Nota: o useEffect M7 antigo (que sincronizava dragPreview com a prop
+  // pós-commit pra evitar flicker) foi removido — o handle sempre lê
+  // direto da prop, então flicker é impossível.
 
   const draggableTop = !!onTopMarginChange;
   const draggableBottom = !!onBottomMarginChange;
@@ -196,14 +218,30 @@ export function VerticalRuler({
             (pageHeightCm - bottomMarginEffectiveCm) * PX_PER_CM
           }
           onStartDrag={startDrag}
-          topActive={
-            dragPreview?.side === "top" && dragPreview.pageIndex === i
-          }
-          bottomActive={
-            dragPreview?.side === "bottom" && dragPreview.pageIndex === i
-          }
+          topActive={marginOverlay?.side === "top"}
+          bottomActive={marginOverlay?.side === "bottom"}
         />
       ))}
+      {/* Linha tracejada HORIZONTAL durante drag dos handles top/bottom.
+       *  Mesma técnica das outras réguas: portal em `document.body` com
+       *  `position: fixed`, some no mouseup. Cor amber (#fbbf24). */}
+      {marginOverlay !== null &&
+        createPortal(
+          <div
+            aria-hidden
+            style={{
+              position: "fixed",
+              top: `${marginOverlay.screenY}px`,
+              left: `${marginOverlay.leftPx}px`,
+              right: 0,
+              height: 0,
+              borderTop: "1px dashed #fbbf24",
+              pointerEvents: "none",
+              zIndex: 9999,
+            }}
+          />,
+          document.body,
+        )}
     </div>
   );
 }
@@ -240,12 +278,17 @@ function PageRulerSegment({
   bottomActive,
 }: PageRulerSegmentProps) {
   const heightPx = pageHeightCm * PX_PER_CM;
+  // Estilo Word: ticks finos a cada 0.25 cm.
+  //   - inteiro     → tick maior (12px) + label
+  //   - meio        → tick médio (7px)
+  //   - quarto      → tick pequeno (3px)
   const ticks: number[] = [];
-  for (let half = 0; half <= pageHeightCm * 2; half++) {
-    ticks.push(half / 2);
+  for (let q = 0; q <= pageHeightCm * 4; q++) {
+    ticks.push(q / 4);
   }
+  // Labels em todo cm inteiro (excluindo 0 pra não colidir com a margem).
   const stops: number[] = [];
-  for (let n = 5; n <= pageHeightCm; n += 5) stops.push(n);
+  for (let n = 1; n <= Math.floor(pageHeightCm); n++) stops.push(n);
 
   // Posições do triângulo "área útil" — entre topMargin e (pH - bottomMargin)
   const usableTopPx = topHandleYInSegmentPx;
@@ -283,9 +326,9 @@ function PageRulerSegment({
       />
       {ticks.map((t) => {
         const y = t * PX_PER_CM;
-        const isMajor = Number.isInteger(t) && t > 0 && t % 5 === 0;
         const isInt = Number.isInteger(t);
-        const tickW = isMajor ? 12 : isInt ? 8 : 4;
+        const isHalf = !isInt && (t * 2) % 1 === 0;
+        const tickW = isInt ? 12 : isHalf ? 7 : 3;
         return (
           <line
             key={t}
