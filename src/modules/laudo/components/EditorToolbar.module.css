@@ -1,0 +1,181 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--sicro-surface-1);
+  border-bottom: 1px solid var(--sicro-divider);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 var(--space-2);
+  border-right: 1px solid var(--sicro-divider);
+}
+.group:last-child {
+  border-right: none;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  color: var(--sicro-fg-muted);
+  transition: background var(--t-fast), color var(--t-fast);
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) {
+  background: var(--sicro-surface-2);
+  color: var(--sicro-fg);
+}
+.btn:focus-visible {
+  outline: 2px solid var(--sicro-accent);
+  outline-offset: 1px;
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.active {
+  background: var(--sicro-accent-soft);
+  color: var(--sicro-accent);
+}
+
+.select {
+  height: 30px;
+  background: var(--sicro-surface-2);
+  border: 1px solid var(--sicro-border);
+  color: var(--sicro-fg);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  padding: 0 var(--space-2);
+  font-family: var(--font-ui);
+  cursor: pointer;
+}
+.select:focus {
+  outline: none;
+  border-color: var(--sicro-accent);
+}
+
+.btnLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  height: 30px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--sicro-fg-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.btnLabel:hover:not(:disabled) {
+  background: var(--sicro-surface-2);
+  color: var(--sicro-fg);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.primary {
+  height: 30px;
+  padding: 0 var(--space-3);
+  background: var(--sicro-accent);
+  color: #1a1305;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.primary:hover:not(:disabled) {
+  background: var(--sicro-accent-hover);
+}
+.primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------------------------------------------------------------------------
+ * F2 — Cor de texto + marca-texto (ColorPickerBtn).
+ *
+ * Cada botão mostra o ícone (palette / highlighter) e abaixo uma faixa fina
+ * com a cor atualmente selecionada. Ao clicar, abre uma grade compacta de
+ * cores + um botão "Remover" para limpar a marca.
+ */
+.colorWrap {
+  position: relative;
+  display: inline-block;
+}
+
+.colorSwatch {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 4px;
+  height: 3px;
+  border-radius: 1.5px;
+  background: transparent;
+  pointer-events: none;
+}
+
+/* Popover do ColorPickerPro: o próprio componente cuida do background,
+ * borda, padding e tamanho fixo (252px). Aqui só posicionamos. */
+.colorMenu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  z-index: 50;
+}
+
+.colorGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+}
+
+.colorChip {
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 0;
+  transition: transform var(--t-fast);
+}
+.colorChip:hover {
+  transform: scale(1.08);
+  border-color: var(--sicro-fg, #e2e8f0);
+}
+
+.colorReset {
+  font-size: 11px;
+  font-family: inherit;
+  padding: 4px 6px;
+  background: transparent;
+  border: 1px solid var(--sicro-border);
+  border-radius: var(--radius-sm);
+  color: var(--sicro-fg-muted);
+  cursor: pointer;
+}
+.colorReset:hover {
+  background: var(--sicro-surface-3, #334155);
+  color: var(--sicro-fg);
+}
+
+/* Permite que o destaque criado pela extension Highlight apareça com o
+ * background correto dentro do editor. */
+:global(.sicro-highlight) {
+  padding: 0 2px;
+  border-radius: 2px;
+}
