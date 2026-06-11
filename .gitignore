@@ -45,6 +45,9 @@ public/pdfjs-wasm/
 docs/*
 !docs/MANUAL_SICRO.md
 !docs/.gitkeep
+
+# Prévias PNG dos BMP do instalador (geradas pelo make_installer_art.py p/ revisão)
+src-tauri/installer/*_preview.png
 *.tmp
 *.bak
 
@@ -95,6 +98,9 @@ sicro.sqlite-shm
 *.psd
 *.ai
 *.bmp
+# EXCEÇÃO: os BMP do instalador NSIS são entradas de build (referenciados em
+# tauri.conf.json) — precisam ser versionados, senão um clone limpo não builda.
+!src-tauri/installer/*.bmp
 
 # Env
 .env

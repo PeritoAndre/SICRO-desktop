@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2.0.0",
-  "productName": "SICRO Desktop",
+  "productName": "SICRO 2.0",
   "version": "2.0.0-beta.0",
   "identifier": "br.org.sicro.desktop",
   "build": {
@@ -43,8 +43,21 @@
       "icons/icon.ico"
     ],
     "category": "Productivity",
+    "publisher": "Polícia Científica do Amapá",
+    "copyright": "© 2026 Polícia Científica do Amapá",
+    "licenseFile": "installer/termo-de-uso.txt",
     "shortDescription": "Suíte pericial SICRO 2.0",
-    "longDescription": "Sistema Integrado de Criminalística e Operações — workspace pericial do perito criminal."
+    "longDescription": "Sistema Integrado de Criminalística e Operações — workspace pericial do perito criminal.",
+    "windows": {
+      "nsis": {
+        "installMode": "both",
+        "languages": ["PortugueseBR"],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "installer/header.bmp",
+        "sidebarImage": "installer/sidebar.bmp"
+      }
+    }
   },
   "plugins": {}
 }
