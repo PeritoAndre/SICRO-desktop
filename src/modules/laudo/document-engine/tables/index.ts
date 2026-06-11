@@ -14,3 +14,12 @@ export {
   type TableEntry,
   type NumberedTableEntry,
 } from "./extractTables";
+export {
+  DEFAULT_TABLE_CONTENT_WIDTH_PX,
+  MIN_SEEDED_COL_WIDTH_PX,
+  REGISTRATION_BLOCK_WEIGHTS,
+  seedEqualColWidths,
+  seedWeightedColWidths,
+  registrationBlockColWidths,
+  buildSeededTableJson,
+} from "./tableDefaults";

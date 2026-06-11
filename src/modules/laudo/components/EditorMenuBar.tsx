@@ -77,9 +77,14 @@ type PopoverId =
 interface EditorMenuBarProps {
   doc: SicroDoc | null;
   editor: Editor | null;
+  /** Editor da REGIÃO ATIVA (cabeçalho/rodapé/corpo). Usado SÓ pelo painel de
+   *  Tabela, pra inserir/editar a tabela ONDE o cursor está (ex.: cabeçalho).
+   *  Os demais painéis (documento: comentários, sumário, etc.) continuam no
+   *  `editor` do corpo. */
+  activeEditor?: Editor | null;
 }
 
-export function EditorMenuBar({ doc, editor }: EditorMenuBarProps) {
+export function EditorMenuBar({ doc, editor, activeEditor }: EditorMenuBarProps) {
   const [openId, setOpenId] = useState<PopoverId | null>(null);
   const activeOccurrence = useWorkspaceStore((s) => s.activeOccurrence);
 
@@ -195,7 +200,7 @@ export function EditorMenuBar({ doc, editor }: EditorMenuBarProps) {
           </>
         }
       >
-        <TablePanel editor={editor} />
+        <TablePanel editor={activeEditor ?? editor} />
       </ToolbarPopover>
 
       <ToolbarPopover

@@ -11,6 +11,8 @@
  */
 
 import type { JSONContent } from "@tiptap/core";
+import { generateTableId } from "../nodes/SicroTable";
+import { seedEqualColWidths } from "./tableDefaults";
 
 export interface TableTemplateDefinition {
   id: string;
@@ -28,6 +30,10 @@ export interface TableTemplateDefinition {
 function cell(text: string, header = false): JSONContent {
   return {
     type: header ? "tableHeader" : "tableCell",
+    // F1.2 — colwidth semeado depois por `applyColWidths` (precisamos saber
+    // quantas colunas a tabela tem). Aqui inicia null e é preenchido em
+    // buildTable.
+    attrs: { colspan: 1, rowspan: 1, colwidth: null },
     content: [
       {
         type: "paragraph",
@@ -41,9 +47,31 @@ function row(cells: JSONContent[]): JSONContent {
   return { type: "tableRow", content: cells };
 }
 
+/**
+ * Monta o nó `table`, gera um `id` estável e SEMEIA `colwidth` igualmente
+ * em cada coluna (F1.2 — com `table-layout: fixed`, colunas sem largura
+ * colapsam). A contagem de colunas vem da primeira linha (somando colspans).
+ */
 function buildTable(rows: JSONContent[]): JSONContent {
+  const firstRow = rows[0];
+  const cols = (firstRow?.content ?? []).reduce(
+    (sum, c) => sum + (Number(c.attrs?.colspan) || 1),
+    0,
+  );
+  const widths = seedEqualColWidths(cols || 1);
+  // Atribui a cada célula a largura da(s) coluna(s) que ela ocupa.
+  for (const r of rows) {
+    let col = 0;
+    for (const c of r.content ?? []) {
+      const span = Number(c.attrs?.colspan) || 1;
+      const slice = widths.slice(col, col + span);
+      c.attrs = { ...(c.attrs ?? {}), colwidth: slice.length ? slice : null };
+      col += span;
+    }
+  }
   return {
     type: "table",
+    attrs: { id: generateTableId() },
     content: rows,
   };
 }

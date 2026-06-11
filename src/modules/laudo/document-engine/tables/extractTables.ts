@@ -61,7 +61,12 @@ function walk(node: JSONContent, basePos: number, out: TableEntry[]): number {
   let inner = basePos + 1;
 
   if (type === "table") {
-    out.push(summarizeTable(node, openPos));
+    // Tabelas de LAYOUT (bloco de registro/timbre, `borderStyle: "none"`)
+    // não entram na lista de tabelas numeradas (espelha numberFigures +
+    // AutoNumbering + SicroTableView).
+    if ((node.attrs?.borderStyle as string | undefined) !== "none") {
+      out.push(summarizeTable(node, openPos));
+    }
   }
 
   for (const child of node.content ?? []) {

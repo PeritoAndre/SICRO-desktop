@@ -37,10 +37,6 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
 import Image from "@tiptap/extension-image";
-import { Table } from "@tiptap/extension-table";
-import { TableRow } from "@tiptap/extension-table-row";
-import { TableHeader } from "@tiptap/extension-table-header";
-import { TableCell } from "@tiptap/extension-table-cell";
 import Placeholder from "@tiptap/extension-placeholder";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
@@ -59,6 +55,15 @@ import { TextBox } from "./nodes/TextBox";
 // forma simplesmente não era criada. Necessário também pro renderer (que usa
 // estas mesmas extensões pra serializar o cabeçalho no HTML/PDF exportado).
 import { Shape } from "./nodes/Shape";
+// F1.2/F4 — Tabela de primeira classe também no cabeçalho/rodapé (mesmo
+// resize + legenda + bordas). Configurada com o marcador do header pra o
+// CSS legado do bloco de registro continuar valendo.
+import { SicroTable } from "./nodes/SicroTable";
+import {
+  SicroTableRow,
+  SicroTableCell,
+  SicroTableHeader,
+} from "./nodes/SicroTableParts";
 import { ParagraphFirstLineIndent } from "./paragraph-indent";
 import { ParagraphSpacing } from "./paragraph-spacing";
 // Campos automáticos `{campo}` + autocomplete por `{` — também no cabeçalho/
@@ -100,13 +105,12 @@ export function headerExtensions(
       allowBase64: true,
       HTMLAttributes: { class: "sicro-header-image" },
     }),
-    Table.configure({
-      resizable: false,
+    SicroTable.configure({
       HTMLAttributes: { "data-sicro-header-table": "true" },
     }),
-    TableRow,
-    TableHeader,
-    TableCell,
+    SicroTableRow,
+    SicroTableHeader,
+    SicroTableCell,
     // Pós-laudo S — Figure + FigCaption + paragraph helpers no header.
     Figure,
     FigCaption,

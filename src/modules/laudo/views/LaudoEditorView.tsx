@@ -68,6 +68,10 @@ import { ShapeOverlay } from "../components/ShapeOverlay";
 // U — TextBox overlay + hook.
 import { useSelectedTextBox } from "../hooks/useSelectedTextBox";
 import { TextBoxOverlay } from "../components/TextBoxOverlay";
+// Overhaul tabelas (F2/F3/F4) — overlay + hook + diálogo de propriedades.
+import { useSelectedTable } from "../hooks/useSelectedTable";
+import { TableOverlay } from "../components/TableOverlay";
+import { TablePropertiesDialog } from "../components/TablePropertiesDialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { formatRelative } from "@core/formatters";
 import { toSicroError } from "@core/errors";
@@ -335,6 +339,13 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
   useMathHydration(editor);
   // U — Detecta TextBox selecionada (body + header) pra renderizar overlay.
   const selectedTextBox = useSelectedTextBox(editor);
+  // Overhaul tabelas — detecta a tabela que contém o cursor (corpo).
+  const selectedTable = useSelectedTable(editor);
+  // Diálogo de propriedades da tabela: aberto pela toolbar/menu do overlay.
+  // Guarda QUAL editor abriu (corpo/cabeçalho/rodapé) pra aplicar no certo.
+  const [tablePropsEditor, setTablePropsEditor] = useState<
+    import("@tiptap/react").Editor | null
+  >(null);
 
   // Pós-laudo S — referência opcional ao editor TipTap do cabeçalho.
   // EditorPage instancia o `headerEditor` internamente via `useHeaderEditor`;
@@ -353,6 +364,8 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
   // selecionar/mover/girar. A inserção já mirava o headerEditor (toolbar U1);
   // faltava só o overlay espelhado, como o TextBox já tinha.
   const selectedHeaderShape = useSelectedShape(headerEditor);
+  // Tabela no cabeçalho (mesma instrumentação — bloco de registro etc.).
+  const selectedHeaderTable = useSelectedTable(headerEditor);
 
   // W (fase 2b) — referência opcional ao editor TipTap do RODAPÉ, simétrico
   // ao headerEditor. EditorPage instancia via `useFooterEditor` e entrega
@@ -364,6 +377,8 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
   >(null);
   const selectedFooterFigure = useSelectedFigure(footerEditor);
   const selectedFooterTextBox = useSelectedTextBox(footerEditor);
+  // Tabela no rodapé (simétrico ao cabeçalho).
+  const selectedFooterTable = useSelectedTable(footerEditor);
 
   // W — Paste de fotos NO RODAPÉ (mesma razão do headerPasteImage: o evento
   // `paste` cai no DOM da instância TipTap do rodapé).
@@ -888,7 +903,17 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
       {/* F4.1 — Menu superior com popovers de configuração
            (Validações / Estilos / Cabeçalho / Página / Dados).
            Substitui as 5 abas extras que estavam no Inspector lateral. */}
-      <EditorMenuBar doc={docForInspector} editor={editor} />
+      <EditorMenuBar
+        doc={docForInspector}
+        editor={editor}
+        activeEditor={
+          editingRegion === "header" && headerEditor
+            ? headerEditor
+            : editingRegion === "footer" && footerEditor
+              ? footerEditor
+              : editor
+        }
+      />
 
       <EditorToolbar
         editor={
@@ -1101,6 +1126,38 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
                 }}
               />
             )}
+            {/* Overhaul tabelas (F2/F3) — overlay com toolbar + handles +
+                menu de contexto pra tabela com cursor. Corpo + cabeçalho +
+                rodapé (3 instâncias), como o TextBoxOverlay. */}
+            <TableOverlay
+              editor={editor}
+              selected={selectedTable}
+              containerRef={editorRegionRef}
+              onOpenProperties={() => setTablePropsEditor(editor)}
+            />
+            {headerEditor && (
+              <TableOverlay
+                editor={headerEditor}
+                selected={selectedHeaderTable}
+                containerRef={editorRegionRef}
+                onOpenProperties={() => setTablePropsEditor(headerEditor)}
+              />
+            )}
+            {footerEditor && (
+              <TableOverlay
+                editor={footerEditor}
+                selected={selectedFooterTable}
+                containerRef={editorRegionRef}
+                onOpenProperties={() => setTablePropsEditor(footerEditor)}
+              />
+            )}
+            {/* F4 — Diálogo de propriedades da tabela (bordas/padding/
+                largura/header). Aplica no editor que o abriu. */}
+            <TablePropertiesDialog
+              open={tablePropsEditor !== null}
+              editor={tablePropsEditor}
+              onClose={() => setTablePropsEditor(null)}
+            />
           </div>
           {showInspector && (
             <Inspector

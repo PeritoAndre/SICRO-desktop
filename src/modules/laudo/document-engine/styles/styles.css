@@ -405,9 +405,44 @@ figure[data-sicro-figure] figcaption:has(> br:only-child) {
   font-weight: 600;
   font-style: italic;
   color: #1e293b;
-  margin: 0.3cm 0 0.1cm;
-  text-align: left;
   user-select: none;
+}
+
+/* F4 — Legenda da tabela (NodeView + clone estático). Espelha o figcaption
+ * do Figure: itálico, menor, abaixo da tabela. A linha tem o prefixo
+ * numerado ("Tabela N — ", não-editável) + o texto livre editável. */
+.sicro-table-caption-row {
+  font-size: 10pt;
+  font-style: italic;
+  color: #334155;
+  margin: 0.1cm 0 0.3cm;
+  text-align: left;
+  line-height: 1.3;
+}
+.sicro-table-caption {
+  font-style: italic;
+  outline: none;
+}
+.sicro-table-caption--editable {
+  min-width: 2ch;
+  cursor: text;
+}
+/* Placeholder visual quando a legenda está vazia (só o prefixo aparece). */
+.sicro-table-caption--empty::after {
+  content: "descreva a tabela…";
+  color: #94a3b8;
+  font-style: italic;
+}
+/* Legenda renderizada no clone estático / export (elemento <caption>). */
+.sicro-editor-content table > caption,
+table[data-sicro-table] > caption,
+caption.sicro-table-caption {
+  caption-side: bottom;
+  font-size: 10pt;
+  font-style: italic;
+  color: #334155;
+  text-align: left;
+  padding: 0.1cm 0 0;
 }
 
 /* F12.2 — CrossReference visual: pequeno badge azul inline indicando
@@ -553,23 +588,77 @@ table[data-sicro-table] {
   margin: 0.3cm 0;
   font-size: 10.5pt;
   page-break-inside: avoid;
+  /* F1.2 — O prosemirror-tables EXIGE `table-layout: fixed` pro resize de
+   * coluna (arrastar a borda) funcionar. As larguras vêm do <colgroup> (no
+   * editor) ou de `data-colwidth` nas células (clone estático/export). */
+  table-layout: fixed;
+}
+
+/* F1.2 — Wrapper do prosemirror-tables (permite scroll horizontal se a
+ * tabela ficar mais larga que a página) + variáveis padrão de borda/padding
+ * que as células herdam (sobrescritas por --sicro-table-* no NodeView/F4). */
+.sicro-editor-content .tableWrapper,
+.sicro-editor-content .sicro-table-wrapper {
+  overflow-x: auto;
+}
+.sicro-table-block {
+  margin: 0.3cm 0;
 }
 
 .sicro-editor-content table th,
 .sicro-editor-content table td,
 table[data-sicro-table] th,
 table[data-sicro-table] td {
-  border: 1px solid #1a1a1a !important;
-  padding: 5px 8px;
+  border: var(--sicro-table-border-width, 1px) solid
+    var(--sicro-table-border-color, #1a1a1a);
+  padding: var(--sicro-table-cell-padding, 5px) 8px;
   vertical-align: top;
   text-align: left;
-  min-width: 32px;
+  /* F1.2 — com table-layout:fixed a largura vem do colgroup; o box-sizing
+   * border-box garante que padding/borda não estourem a coluna. */
+  box-sizing: border-box;
   position: relative;
 }
 
+/* F4 — Toggle de bordas: "none" remove a grade (estilo bloco de registro).
+ * Sobrepõe a regra geral via especificidade (atributo na <table>). */
+table[data-border-style="none"] td,
+table[data-border-style="none"] th,
+.sicro-editor-content table[data-border-style="none"] td,
+.sicro-editor-content table[data-border-style="none"] th {
+  border: none;
+}
+
+/* F1.2 — Handle de resize de coluna (prosemirror-tables). O plugin insere
+ * `<div class="column-resize-handle">` na célula sob o cursor da borda. */
+.sicro-editor-content .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  z-index: 20;
+  background-color: #1f6feb;
+  pointer-events: none;
+}
+/* Cursor de redimensionamento quando o mouse paira sobre a borda. */
+.sicro-editor-content.resize-cursor,
+.sicro-editor-content .resize-cursor {
+  cursor: col-resize;
+}
+
+/* Cabeçalho de tabela: SÓ negrito/cor de texto — SEM fundo cinza automático.
+ *
+ * BUG FIX — Antes, este seletor pintava TODA `<th>` de cinza (#e5e7eb). Como
+ * a 1ª linha das tabelas inseridas (templates / "Inserir tabela" com cabeçalho)
+ * usa nós `tableHeader` e o corpo usa `tableCell`, a tabela nascia com a 1ª
+ * linha cinza e o resto branco — um sombreado que o usuário NÃO pediu e que
+ * parecia aleatório. O sombreado de célula agora é OPCIONAL e explícito
+ * (attr `backgroundColor`, via `[data-cell-bg]` / style inline), aplicável a
+ * qualquer célula. Sem isso, toda tabela recém-inserida + bloco de registro +
+ * templates ficam VISUALMENTE CONSISTENTES (fundo transparente por padrão). */
 .sicro-editor-content table th,
 table[data-sicro-table] th {
-  background: #e5e7eb;
   font-weight: 600;
   color: #0f172a;
 }
@@ -582,19 +671,21 @@ table[data-sicro-table] tr {
 /* V2 — Bloco de registro do CABEÇALHO: SÓ o retângulo externo (a "forma"
  * do timbre), SEM as divisórias internas entre as 3 colunas. Vale tanto no
  * editor do cabeçalho (.sicro-editor-content) quanto no clone estático da
- * visualização normal, e casa com o renderer (PDF). A especificidade extra
- * (classe + atributo) + !important vencem a regra geral
- * `.sicro-editor-content table td { border: 1px !important }`. */
+ * visualização normal, e casa com o renderer (PDF).
+ *
+ * F4 — Agora o "sem grade interna" é dirigido por `data-border-style="none"`
+ * (uniforme corpo+cabeçalho). O `data-sicro-header-table` (clone estático/
+ * docs legados) preserva o RETÂNGULO EXTERNO mesmo sem bordas de célula. */
 table[data-sicro-header-table],
 .sicro-editor-content table[data-sicro-header-table] {
-  border: 1px solid #1a1a1a !important;
-  border-collapse: collapse !important;
+  border: 1px solid #1a1a1a;
+  border-collapse: collapse;
 }
-table[data-sicro-header-table] td,
-table[data-sicro-header-table] th,
-.sicro-editor-content table[data-sicro-header-table] td,
-.sicro-editor-content table[data-sicro-header-table] th {
-  border: none !important;
+table[data-border-style="none"],
+.sicro-editor-content table[data-border-style="none"] {
+  /* Tabela sem grade: mantém só o retângulo externo (útil pro bloco de
+   * registro mesmo quando vier por data-border-style, não só legado). */
+  border: 1px solid var(--sicro-table-border-color, #1a1a1a);
 }
 
 /* F7.1 — Alinhamento vertical do conteúdo da célula via data-valign. */
@@ -633,10 +724,26 @@ table[data-sicro-table] th p {
   margin: 0;
 }
 
-/* prosemirror-tables: selectedCell highlight */
+/* F3 — Altura de linha: o <tr data-row-height-cm> recebe `height` inline
+ * (do renderHTML do SicroTableRow). Com border-collapse, height no <tr>
+ * funciona como min-height. Reforçamos garantindo que as células herdem. */
+.sicro-editor-content table tr[data-row-height-cm] td,
+.sicro-editor-content table tr[data-row-height-cm] th,
+table[data-sicro-table] tr[data-row-height-cm] td,
+table[data-sicro-table] tr[data-row-height-cm] th {
+  height: inherit;
+}
+
+/* prosemirror-tables: selectedCell highlight.
+ *
+ * Usa um overlay via `box-shadow: inset` em vez de `background` porque a
+ * célula pode ter um `background-color` INLINE (attr `backgroundColor` / F-bg)
+ * — e estilo inline venceria a regra de `background` aqui, escondendo o
+ * realce de seleção. O inset shadow fica POR CIMA do fundo da célula, então
+ * a seleção é sempre visível, com ou sem cor de fundo. */
 .sicro-editor-content table td.selectedCell,
 .sicro-editor-content table th.selectedCell {
-  background: rgba(59, 130, 246, 0.18);
+  box-shadow: inset 0 0 0 1000px rgba(59, 130, 246, 0.18);
 }
 
 /* ===========================================================================

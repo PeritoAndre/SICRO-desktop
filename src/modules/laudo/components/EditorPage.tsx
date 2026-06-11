@@ -387,69 +387,105 @@ export function EditorPage({
     pageHeightCm,
   ]);
 
-  // M8 — HISTÓRICO UNIFICADO TEXTO+MARGEM PARA Ctrl+Z/Ctrl+Y.
+  // M8 / Pós-laudo Ctrl+Z — HISTÓRICO UNIFICADO TEXTO+MARGEM (3 regiões).
   //
-  // O editor TipTap mantém seu próprio histórico (prosemirror-history) só
-  // pra mudanças no doc (texto, formato, blocos). Mudanças de margem
-  // (via drag da régua) atualizam `doc.layout.page.margins` mas isso vai
-  // pela camada do store, NÃO pelo histórico do TipTap. Resultado: Ctrl+Z
-  // não desfazia mudança de margem.
+  // Cada editor TipTap mantém seu próprio histórico (prosemirror-history) só
+  // pra mudanças no SEU doc (texto, formato, blocos, OBJETOS: tabela/caixa de
+  // texto/forma/figura — toda transação despachada via overlay/NodeView é
+  // desfazível por padrão). Mudanças de margem (via drag da régua) atualizam
+  // `doc.layout.page.margins` pela camada do STORE, NÃO pelo histórico do
+  // TipTap — então precisam ser capturadas à parte.
   //
-  // Solução: mantenho uma fila unificada de eventos em ordem cronológica:
-  //   { type: "text" }          — corresponde a 1 step de undo do TipTap
-  //   { type: "margin", prev, next } — captura snapshot pra desfazer
+  // Solução: mantenho UMA fila unificada de eventos em ordem cronológica:
+  //   { type: "text"; region }       — 1 step de undo de UM dos editores
+  //   { type: "margin"; prev; next } — snapshot pra desfazer mudança de margem
   //
-  // Sincronia com TipTap: monitoro `undoDepth(view.state)`. Quando aumenta
-  // (e não veio do nosso próprio undo/redo), empilho um evento "text" —
-  // assim minha fila tem exatamente 1 entrada por step do TipTap.
+  // POR QUE 3 REGIÕES: o cabeçalho e o rodapé são instâncias TipTap separadas
+  // do corpo (useHeaderEditor/useFooterEditor). Antes este histórico só
+  // observava o editor do CORPO e o Ctrl+Z (capture-phase, com
+  // stopPropagation) sempre chamava `editor.commands.undo()` do CORPO. Logo,
+  // QUALQUER objeto manipulado no cabeçalho/rodapé (tabela, caixa de texto,
+  // forma, figura) ficava FORA do desfazer — pior: o Ctrl+Z desfazia uma
+  // edição não-relacionada do corpo. Agora cada evento "text" carrega a
+  // REGIÃO que o originou, e o undo/redo é roteado pro editor certo.
   //
-  // Ctrl+Z: pop do topo. Se "text", chamo `editor.commands.undo()` (que
-  // executa o undo do step correspondente no TipTap). Se "margin", aplico
-  // `prev` via `onLayoutChange`. Em ambos os casos empilho no redoStack.
-  // Ctrl+Y / Ctrl+Shift+Z: simétrico.
+  // Sincronia: observo `undoDepth` dos TRÊS editores. Quando o de UMA região
+  // aumenta (e não veio do meu próprio undo/redo), empilho um evento "text"
+  // com aquela região — 1 entrada por step daquele editor.
   //
   // Capture-phase no document: intercepto o keydown ANTES do TipTap,
   // restringindo ao container do editor (não dispara em outros inputs).
+  type UndoRegion = "body" | "header" | "footer";
   type UnifiedEvent =
-    | { type: "text" }
+    | { type: "text"; region: UndoRegion }
     | { type: "margin"; prev: SicroDocPageMargins; next: SicroDocPageMargins };
 
   const unifiedHistoryRef = useRef<UnifiedEvent[]>([]);
   const redoHistoryRef = useRef<UnifiedEvent[]>([]);
   const isInternalUndoRef = useRef(false);
-  const prevUndoDepthRef = useRef(0);
+  // Profundidade de undo conhecida por região (pra detectar incrementos).
+  const prevUndoDepthRef = useRef<Record<UndoRegion, number>>({
+    body: 0,
+    header: 0,
+    footer: 0,
+  });
 
-  // Subscribe ao editor: cada vez que undoDepth aumenta, é porque o
-  // TipTap criou um novo step de history. Empilho "text" — exceto se a
-  // transação veio do meu próprio undo/redo (isInternalUndoRef).
+  // Resolve a instância TipTap de uma região (pode ser null se não montada).
+  const editorForRegion = useCallback(
+    (region: UndoRegion): Editor | null => {
+      if (region === "header") return headerEditor;
+      if (region === "footer") return footerEditor;
+      return editor;
+    },
+    [editor, headerEditor, footerEditor],
+  );
+
+  // Subscribe aos TRÊS editores: cada vez que o undoDepth de um deles
+  // aumenta, o TipTap criou um novo step de history NAQUELA região. Empilho
+  // "text" com a região — exceto se a transação veio do meu próprio undo/redo
+  // (isInternalUndoRef). Re-assina quando qualquer instância troca (ex.: o
+  // header/footer monta/desmonta ao ligar/desligar a região).
   useEffect(() => {
-    if (!editor) return;
-    prevUndoDepthRef.current = undoDepth(editor.view.state);
-    const handler = () => {
-      const newDepth = undoDepth(editor.view.state);
-      if (newDepth > prevUndoDepthRef.current && !isInternalUndoRef.current) {
-        unifiedHistoryRef.current.push({ type: "text" });
-        redoHistoryRef.current = [];
-      }
-      prevUndoDepthRef.current = newDepth;
+    const subs: Array<{ ed: Editor; region: UndoRegion; fn: () => void }> = [];
+    const wire = (ed: Editor | null, region: UndoRegion) => {
+      if (!ed) return;
+      prevUndoDepthRef.current[region] = undoDepth(ed.view.state);
+      const fn = () => {
+        const newDepth = undoDepth(ed.view.state);
+        if (
+          newDepth > prevUndoDepthRef.current[region] &&
+          !isInternalUndoRef.current
+        ) {
+          unifiedHistoryRef.current.push({ type: "text", region });
+          redoHistoryRef.current = [];
+        }
+        prevUndoDepthRef.current[region] = newDepth;
+      };
+      ed.on("transaction", fn);
+      subs.push({ ed, region, fn });
     };
-    editor.on("transaction", handler);
+    wire(editor, "body");
+    wire(headerEditor, "header");
+    wire(footerEditor, "footer");
     return () => {
-      editor.off("transaction", handler);
+      for (const { ed, fn } of subs) ed.off("transaction", fn);
     };
-  }, [editor]);
+  }, [editor, headerEditor, footerEditor]);
 
   // Aplica o evento no topo da pilha de undo.
   const applyUnifiedUndo = useCallback((): boolean => {
     while (unifiedHistoryRef.current.length > 0) {
       const event = unifiedHistoryRef.current.pop()!;
       if (event.type === "text") {
-        if (!editor) {
+        const ed = editorForRegion(event.region);
+        if (!ed) {
+          // Região não montada (ex.: header desligado entre o registro e o
+          // undo). Guarda no redo e segue — não trava o Ctrl+Z.
           redoHistoryRef.current.push(event);
           return true;
         }
         isInternalUndoRef.current = true;
-        const ok = editor.commands.undo();
+        const ok = ed.commands.undo();
         isInternalUndoRef.current = false;
         if (ok) {
           redoHistoryRef.current.push(event);
@@ -468,18 +504,19 @@ export function EditorPage({
       }
     }
     return false;
-  }, [editor, onLayoutChange]);
+  }, [editorForRegion, onLayoutChange]);
 
   const applyUnifiedRedo = useCallback((): boolean => {
     while (redoHistoryRef.current.length > 0) {
       const event = redoHistoryRef.current.pop()!;
       if (event.type === "text") {
-        if (!editor) {
+        const ed = editorForRegion(event.region);
+        if (!ed) {
           unifiedHistoryRef.current.push(event);
           return true;
         }
         isInternalUndoRef.current = true;
-        const ok = editor.commands.redo();
+        const ok = ed.commands.redo();
         isInternalUndoRef.current = false;
         if (ok) {
           unifiedHistoryRef.current.push(event);
@@ -495,7 +532,7 @@ export function EditorPage({
       }
     }
     return false;
-  }, [editor, onLayoutChange]);
+  }, [editorForRegion, onLayoutChange]);
 
   // Keydown global capture-phase, escopado ao container do editor.
   // Atalhos: Ctrl+Z (undo), Ctrl+Y / Ctrl+Shift+Z (redo).

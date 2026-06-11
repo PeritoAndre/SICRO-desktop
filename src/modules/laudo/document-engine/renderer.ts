@@ -68,12 +68,33 @@ const BASE_DOC_STYLES = `
   }
   table[data-sicro-table] {
     border-collapse: collapse; width: 100%; margin: 1em 0; font-size: 11pt;
+    /* F1.2 — resize de coluna serializa via <colgroup>; fixed respeita-o. */
+    table-layout: fixed;
   }
   table[data-sicro-table] th,
   table[data-sicro-table] td {
-    border: 1px solid #444; padding: 4px 8px; vertical-align: top;
+    border: var(--sicro-table-border-width, 1px) solid
+      var(--sicro-table-border-color, #444);
+    padding: var(--sicro-table-cell-padding, 4px) 8px;
+    vertical-align: top; box-sizing: border-box;
   }
-  table[data-sicro-table] th { background: #ececec; }
+  /* Cabecalho: so negrito (herdado do th), SEM fundo cinza automatico —
+     espelha o BUG FIX do styles.css. O sombreado de celula e opcional e
+     explicito (attr backgroundColor -> style inline background-color emitido
+     pelo renderHTML do cell, vale aqui sem regra extra). */
+  /* F4 — Apresentação serializada via data-* (cor/espessura/padding/align/
+     bordas) + legenda <caption> abaixo da tabela. Espelha styles.css. */
+  table[data-border-style="none"] td,
+  table[data-border-style="none"] th { border: none; }
+  table[data-border-style="none"] {
+    border: 1px solid var(--sicro-table-border-color, #444);
+  }
+  table[data-table-align="center"] { margin-left: auto; margin-right: auto; }
+  table[data-table-align="right"] { margin-left: auto; margin-right: 0; }
+  table[data-sicro-table] > caption {
+    caption-side: bottom; font-size: 10pt; font-style: italic;
+    color: #333; text-align: left; padding-top: 0.2em;
+  }
   /* V2 — bloco de registro do cabeçalho: só o retângulo externo (sem
      divisórias internas), igual à tela. */
   table[data-sicro-header-table] {

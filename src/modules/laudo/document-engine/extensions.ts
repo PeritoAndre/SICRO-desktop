@@ -14,10 +14,6 @@ import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import TextAlign from "@tiptap/extension-text-align";
 import Image from "@tiptap/extension-image";
-import { Table } from "@tiptap/extension-table";
-import { TableRow } from "@tiptap/extension-table-row";
-import { TableHeader } from "@tiptap/extension-table-header";
-import { TableCell } from "@tiptap/extension-table-cell";
 import Placeholder from "@tiptap/extension-placeholder";
 // F2 — Edição rica: marca cor de fonte + realce + sub/sobrescrito + família/tamanho.
 //
@@ -44,6 +40,10 @@ import {
   MathBlock,
   PhotoPlate,
   Shape,
+  SicroTable,
+  SicroTableRow,
+  SicroTableCell,
+  SicroTableHeader,
   TextBox,
   QuesitoAnswer,
   QuesitoItem,
@@ -140,13 +140,14 @@ export function laudoExtensions(opts?: LaudoExtensionsOptions): Extensions {
       inline: false,
       allowBase64: true,
     }),
-    Table.configure({
-      resizable: false,
-      HTMLAttributes: { "data-sicro-table": "true" },
-    }),
-    TableRow,
-    TableHeader,
-    TableCell,
+    // F1.2/F4 — Tabela de primeira classe: resize de coluna + legenda +
+    // bordas/align/padding (ver SicroTable). `resizable: true` exige
+    // `table-layout: fixed` (styles.css) e colwidths semeados no insert.
+    // Linhas/células estendidas: altura de linha (F3) + valign (F4).
+    SicroTable,
+    SicroTableRow,
+    SicroTableHeader,
+    SicroTableCell,
     Figure,
     FigCaption,
     // Q — Shape: formas geométricas flutuantes pra anotação.

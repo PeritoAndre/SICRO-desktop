@@ -132,6 +132,12 @@ function compute(doc: ProseMirrorNode): AutoNumberingState {
     }
 
     if (node.type.name === "table") {
+      // Tabelas de LAYOUT (bloco de registro/timbre, `borderStyle: "none"`)
+      // não são exibições numeradas — não entram na contagem nem no map de
+      // cross-refs (espelha numberFigures + SicroTableView).
+      if ((node.attrs["borderStyle"] as string | undefined) === "none") {
+        return false;
+      }
       counters.table += 1;
       const ordinal = counters.table;
       const id = node.attrs["id"] as string | undefined;
@@ -139,14 +145,11 @@ function compute(doc: ProseMirrorNode): AutoNumberingState {
       if (id) {
         idToOrdinal.set(id, { kind: "table", ordinal, label });
       }
-      // Widget ANTES da tabela (decoration acima da tabela).
-      decorations.push(
-        Decoration.widget(pos, () => makeTableLabel(label), {
-          side: -1,
-          key: `autonum-table-${id ?? pos}-${label}`,
-          ignoreSelection: true,
-        }),
-      );
+      // F4 — A numeração da tabela passou a viver DENTRO da legenda
+      // ("Tabela N — …"), renderizada pelo NodeView (SicroTableView) e pelo
+      // renderer (numberFigures). NÃO emitimos mais o widget acima da tabela
+      // pra não duplicar o número. O `idToOrdinal` continua exposto pra
+      // cross-references (F12.2) e pra lista de tabelas.
       return false; // não desce em tableRow/tableCell
     }
 
@@ -178,15 +181,6 @@ function makeLabel(label: string): HTMLElement {
   span.contentEditable = "false";
   span.setAttribute("data-auto-number", "true");
   return span;
-}
-
-function makeTableLabel(label: string): HTMLElement {
-  const div = document.createElement("div");
-  div.className = "sicro-auto-number-table";
-  div.textContent = label;
-  div.contentEditable = "false";
-  div.setAttribute("data-auto-number", "true");
-  return div;
 }
 
 /** Helper público para consumidores. */

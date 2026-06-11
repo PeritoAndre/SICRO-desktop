@@ -204,6 +204,107 @@ fn renders_paragraphs_headings_marks_table_figure_storyboard() {
 }
 
 #[test]
+fn renders_table_with_caption_widths_align_and_rowheight() {
+    // Overhaul tabelas (F1.2/F3/F4): colwidths → grid <w:gridCol>, alinhamento
+    // → <w:jc>, legenda → parágrafo abaixo, altura de linha → <w:trHeight>,
+    // colspan → <w:gridSpan>.
+    let envelope = json!({
+        "title": "Tabela rica",
+        "content": {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "table",
+                    "attrs": {
+                        "id": "tbl-1",
+                        "caption": "Tabela 1 — Dados do local",
+                        "tableAlign": "center",
+                        "borderStyle": "all",
+                        "cellPadding": 5
+                    },
+                    "content": [
+                        { "type": "tableRow", "attrs": { "rowHeight": 1.5 }, "content": [
+                            { "type": "tableHeader", "attrs": { "colspan": 2, "rowspan": 1, "colwidth": [200, 200] }, "content": [
+                                { "type": "paragraph", "content": [{ "type": "text", "text": "Cabecalho2col" }] }
+                            ]},
+                        ]},
+                        { "type": "tableRow", "content": [
+                            { "type": "tableCell", "attrs": { "colspan": 1, "rowspan": 1, "colwidth": [200], "data-valign": "middle" }, "content": [
+                                { "type": "paragraph", "content": [{ "type": "text", "text": "CelEsq" }] }
+                            ]},
+                            { "type": "tableCell", "attrs": { "colspan": 1, "rowspan": 1, "colwidth": [200] }, "content": [
+                                { "type": "paragraph", "content": [{ "type": "text", "text": "CelDir" }] }
+                            ]},
+                        ]},
+                    ]
+                }
+            ]
+        }
+    });
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("table-rich.docx");
+    render_doc_to_docx(&envelope, &path, None).expect("render_doc_to_docx ok");
+    let xml = extract_document_xml(&path);
+
+    assert_contains_all(
+        &xml,
+        &[
+            "Cabecalho2col",
+            "CelEsq",
+            "CelDir",
+            // Legenda como parágrafo abaixo da tabela.
+            "Tabela 1 \u{2014} Dados do local",
+            // Grid de colunas (larguras) — docx-rs emite <w:gridCol w:w="..."/>.
+            "<w:gridCol",
+            // Alinhamento central da tabela.
+            "<w:jc w:val=\"center\"",
+            // colspan → gridSpan.
+            "<w:gridSpan",
+            // altura de linha → trHeight.
+            "<w:trHeight",
+        ],
+    );
+}
+
+#[test]
+fn renders_borderless_registration_block_without_caption() {
+    // O bloco de registro (borderStyle "none", sem caption) NÃO deve gerar
+    // legenda nem numeração — é tabela de layout.
+    let envelope = json!({
+        "title": "Bloco de registro",
+        "content": {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "table",
+                    "attrs": { "id": "tbl-reg", "borderStyle": "none", "caption": "" },
+                    "content": [
+                        { "type": "tableRow", "content": [
+                            { "type": "tableCell", "attrs": { "colspan": 1, "rowspan": 1, "colwidth": [300] }, "content": [
+                                { "type": "paragraph", "content": [{ "type": "text", "text": "RegistradoEm" }] }
+                            ]},
+                        ]},
+                    ]
+                }
+            ]
+        }
+    });
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let path = tmp.path().join("reg-block.docx");
+    render_doc_to_docx(&envelope, &path, None).expect("render_doc_to_docx ok");
+    let xml = extract_document_xml(&path);
+
+    assert!(xml.contains("RegistradoEm"), "missing cell text; xml:\n{xml}");
+    // Sem rótulo "Tabela N" auto.
+    assert!(
+        !xml.contains("Tabela 1"),
+        "registration block must not be numbered; xml:\n{xml}"
+    );
+}
+
+#[test]
 fn renders_empty_document_without_crashing() {
     // Reproduces the user's actual exported .sicrodoc: just the envelope
     // around a doc with a single empty paragraph. The walker should emit the

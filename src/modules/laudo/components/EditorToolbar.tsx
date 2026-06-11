@@ -27,7 +27,6 @@ import {
   List,
   ListOrdered,
   Minus,
-  Palette,
   Save,
   Search,
   Shapes,
@@ -51,6 +50,8 @@ import { SigdocsCredentialsDialog } from "./SigdocsCredentialsDialog";
 import { exportLaudo } from "../services/laudoExport";
 import { ExportMenu } from "./ExportMenu";
 import type { SicroDoc } from "../document-engine";
+// F1.2 — Bloco de registro com colwidths semeados (larga/média/estreita).
+import { generateTableId, registrationBlockColWidths } from "../document-engine";
 import styles from "./EditorToolbar.module.css";
 
 // F2 — Edição rica.
@@ -112,19 +113,79 @@ const FONT_FAMILIES: ReadonlyArray<{ value: string; label: string }> = [
   { value: "Gabriola, serif", label: "Gabriola" },
 ];
 
-const FONT_SIZES: ReadonlyArray<string> = [
-  "8pt",
-  "9pt",
-  "10pt",
-  "11pt",
-  "12pt",
-  "13pt",
-  "14pt",
-  "16pt",
-  "18pt",
-  "20pt",
-  "24pt",
+// Tamanhos padrão do dropdown (estilo Word, até 72). O combobox é
+// DIGITÁVEL — o usuário pode informar qualquer número fora desta lista
+// (inteiros ou meios, ex.: 10.5, 53). Estes são só os atalhos prontos.
+const FONT_SIZES_PT: ReadonlyArray<number> = [
+  6, 7, 8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 36, 48, 72,
 ];
+
+// Faixa aceita ao digitar um tamanho à mão.
+const FONT_SIZE_MIN = 1;
+const FONT_SIZE_MAX = 200;
+
+/**
+ * Converte uma string CSS de tamanho (ex.: "12pt", "16px") para o número
+ * em pt exibido no campo. Aceita só valores em pt (o resto do app sempre
+ * grava `${n}pt`); para qualquer outra unidade devolve `null` para não
+ * exibir um número enganoso no input.
+ */
+function parseFontSizePt(value: string | undefined | null): number | null {
+  if (!value) return null;
+  const m = /^([0-9]+(?:\.[0-9]+)?)\s*pt$/i.exec(value.trim());
+  if (!m) return null;
+  const n = Number.parseFloat(m[1]!);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Formata um número de pt para exibição no campo (sem zeros à toa). */
+function formatPt(n: number): string {
+  return String(n);
+}
+
+/**
+ * Lê um atributo da marca `textStyle` ao longo da seleção ATUAL.
+ *  - Cursor recolhido → o valor no ponto do cursor (incl. marca "stored").
+ *  - Seleção em faixa → o valor único quando TODO o texto selecionado o
+ *    compartilha; `MIXED` quando há valores diferentes (o controle deve
+ *    ficar vazio, como no Word).
+ *
+ * Retorna `undefined` quando não há valor (== padrão), uma string com o
+ * valor, ou o sentinela `MIXED`.
+ */
+const MIXED = Symbol("mixed");
+function readTextStyleAttr(
+  editor: Editor,
+  attr: "fontSize" | "fontFamily" | "color",
+): string | undefined | typeof MIXED {
+  const { state } = editor;
+  const { from, to, empty } = state.selection;
+  if (empty) {
+    const a = editor.getAttributes("textStyle") as Record<string, unknown>;
+    const v = a[attr];
+    return typeof v === "string" && v ? v : undefined;
+  }
+  // Faixa: percorre os nós de texto e coleta o valor da marca textStyle.
+  let seen: string | undefined;
+  let initialized = false;
+  let mixed = false;
+  state.doc.nodesBetween(from, to, (node) => {
+    if (mixed) return false;
+    if (!node.isText) return undefined;
+    const mark = node.marks.find((m) => m.type.name === "textStyle");
+    const raw = mark?.attrs?.[attr];
+    const v = typeof raw === "string" && raw ? raw : undefined;
+    if (!initialized) {
+      seen = v;
+      initialized = true;
+    } else if (seen !== v) {
+      mixed = true;
+    }
+    return undefined;
+  });
+  if (mixed) return MIXED;
+  return seen;
+}
 
 // As paletas FONT_COLORS / HIGHLIGHT_COLORS antigas foram substituídas pelo
 // `ColorPickerPro` (S/V pad + hue slider + paleta de 40 + recentes), que
@@ -178,6 +239,29 @@ export function EditorToolbar({
   const setSigdocsCoverOpen = useSigdocsStore((s) => s.setCoverOpen);
   // K — Modal de gerenciamento de credenciais SIGDOC.
   const [credentialsDialogOpen, setCredentialsDialogOpen] = useState(false);
+
+  // Pós-laudo — Reatividade por SELEÇÃO. A toolbar lê `editor.getAttributes`
+  // e `editor.isActive` no render, mas o React não re-renderiza quando só a
+  // SELEÇÃO muda (clicar num texto sem digitar). Sem isto, escrever em 12pt
+  // e clicar num trecho de 20pt mantinha o controle mostrando 12. Assinamos
+  // os eventos do editor ativo e forçamos um re-render para que TODOS os
+  // indicadores (tamanho, família, cor, isActive de bold/itálico/…) reflitam
+  // o ponto do cursor ao vivo. Re-assina quando o `editor` troca (corpo →
+  // cabeçalho → rodapé).
+  const [, forceUpdate] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (!editor) return undefined;
+    const bump = () => forceUpdate();
+    editor.on("selectionUpdate", bump);
+    editor.on("transaction", bump);
+    // Sincroniza uma vez ao montar / trocar de editor (a região recém-ativa
+    // pode já ter um cursor posicionado).
+    bump();
+    return () => {
+      editor.off("selectionUpdate", bump);
+      editor.off("transaction", bump);
+    };
+  }, [editor]);
 
   const handleToggleSigdocs = async () => {
     if (!workspacePath) return;
@@ -270,22 +354,34 @@ export function EditorToolbar({
   };
 
   // F2 — Helpers para cor, realce, fonte, tamanho.
-  // Atributos atuais lidos via `editor.getAttributes("textStyle")` para
-  // pre-selecionar dropdowns/cores. Quando não há textStyle ativo, retorna
-  // strings vazias (== "Fonte padrão" no select).
-  const textStyleAttrs = editor.getAttributes("textStyle") as {
-    color?: string;
-    fontFamily?: string;
-    fontSize?: string;
-  };
+  // Atributos lidos ao longo da SELEÇÃO atual (ver `readTextStyleAttr`), de
+  // modo que os controles reflitam o ponto do cursor ao vivo (a reatividade
+  // por seleção é garantida pelo useEffect acima). Seleção com valores
+  // mistos → controle vazio (estilo Word).
+  const rawFamily = readTextStyleAttr(editor, "fontFamily");
+  const rawSize = readTextStyleAttr(editor, "fontSize");
+  const rawColor = readTextStyleAttr(editor, "color");
+
   // Pós-laudo S — defaults Times New Roman 12pt. Quando o usuário ainda
-  // não escolheu fonte/tamanho explicitamente, mostramos esses valores
-  // no dropdown (em vez de "Fonte padrão" / "Tam.") pra fechar o gap
-  // de feedback visual.
-  const currentFontFamily =
-    textStyleAttrs.fontFamily ?? "Times New Roman, serif";
-  const currentFontSize = textStyleAttrs.fontSize ?? "12pt";
-  const currentColor = textStyleAttrs.color ?? "";
+  // não escolheu fonte/tamanho explicitamente (e não há mistura), mostramos
+  // esses valores pra fechar o gap de feedback visual. Em seleção mista a
+  // família mostra "" ("Fonte padrão") e o tamanho fica vazio.
+  const fontFamilyMixed = rawFamily === MIXED;
+  const currentFontFamily = fontFamilyMixed
+    ? ""
+    : (rawFamily ?? "Times New Roman, serif");
+
+  // Tamanho como NÚMERO em pt (exibido sem "pt" no campo). `null` = vazio
+  // (seleção mista ou unidade não-pt).
+  const fontSizeMixed = rawSize === MIXED;
+  const currentFontSizePt = fontSizeMixed
+    ? null
+    : (parseFontSizePt(typeof rawSize === "string" ? rawSize : null) ?? 12);
+
+  const colorMixed = rawColor === MIXED;
+  const currentColor = colorMixed
+    ? ""
+    : (typeof rawColor === "string" ? rawColor : "");
 
   // Pós-laudo S — atributos de espaçamento do bloco ativo (parágrafo
   // ou heading mais próximo). Usados pelos controles de line-height +
@@ -393,6 +489,14 @@ export function EditorToolbar({
       editor.chain().focus().setFontSize(value).run();
     }
   };
+  // Aplica um tamanho numérico em pt (clampado à faixa sensata). Reaplica
+  // sempre como `${n}pt` — o resto do app espera essa unidade.
+  const applyFontSizePt = (n: number) => {
+    const clamped = Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, n));
+    // Arredonda a no máx. 1 casa (aceita meios, ex.: 10.5).
+    const rounded = Math.round(clamped * 10) / 10;
+    setFontSize(`${rounded}pt`);
+  };
   const setColor = (color: string) => {
     editor.chain().focus().setColor(color).run();
   };
@@ -440,21 +544,18 @@ export function EditorToolbar({
             </option>
           ))}
         </select>
-        <select
-          className={styles.select}
-          value={currentFontSize}
-          onChange={(e) => setFontSize(e.target.value)}
-          aria-label="Tamanho"
-          title="Tamanho da fonte"
-          style={{ minWidth: 64 }}
-        >
-          <option value="">Tam.</option>
-          {FONT_SIZES.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
+        <FontSizeCombo
+          valuePt={currentFontSizePt}
+          onApply={applyFontSizePt}
+        />
+        {/* Cor do texto — ao LADO do tamanho (estilo Word). Swatch reflete a
+            cor do cursor; `<input type="color">` nativo + botão limpar. O
+            marca-texto continua no grupo de marcas, mais adiante. */}
+        <TextColorSwatch
+          current={currentColor}
+          onSelect={setColor}
+          onClear={unsetColor}
+        />
       </div>
 
       {/* Pós-laudo S — Grupo de espaçamento (entrelinhas + antes/depois). */}
@@ -619,13 +720,8 @@ export function EditorToolbar({
       </div>
 
       <div className={styles.group}>
-        <ColorPickerBtn
-          icon={<Palette size={14} />}
-          label="Cor do texto"
-          current={currentColor}
-          onSelect={setColor}
-          onClear={unsetColor}
-        />
+        {/* A cor do TEXTO foi movida pra junto do tamanho (acima). Aqui fica
+            só o marca-texto (highlight), que continua com o picker rico. */}
         <ColorPickerBtn
           icon={<Highlighter size={14} />}
           label="Marca-texto"
@@ -879,7 +975,7 @@ function ToolBtn({ isActive, onClick, label, children }: ToolBtnProps) {
 // vive em `ColorPickerPro.tsx`. Este componente só cuida do botão da
 // toolbar + abertura/fechamento do popover com click-outside.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import { ColorPickerPro } from "./ColorPickerPro";
 
 interface ColorPickerBtnProps {
@@ -948,6 +1044,231 @@ function ColorPickerBtn({
       )}
     </div>
   );
+}
+
+// ============================================================================
+// FontSizeCombo — combobox DIGITÁVEL de tamanho de fonte (estilo Word).
+//
+// `<input>` digitável + botão de caret (▼) que abre um DROPDOWN CUSTOM
+// (popover estilizado) com os tamanhos padrão (até 72). O usuário pode:
+//   - DIGITAR qualquer número (inteiro ou meio, ex.: 10.5, 53), aplicado
+//     no Enter ou no blur;
+//   - ABRIR o caret e clicar num tamanho da lista (aplica na hora).
+//
+// Por que dropdown custom em vez de `<datalist>`: a `<datalist>` nativa é
+// não-confiável no WebView2/Chromium do app — ela filtra as opções pelo
+// valor atual do input e não mostra o caret nem abre de forma previsível.
+// O popover custom (mesma mecânica de click-fora/Esc dos outros menus da
+// toolbar) abre sempre e lista TODOS os tamanhos.
+//
+// O valor exibido segue o cursor (vem da prop `valuePt`); seleção mista →
+// campo vazio. O campo guarda o texto enquanto é editado e só commita ao
+// confirmar — assim dá pra digitar "53" sem reaplicar a cada tecla.
+// ============================================================================
+
+function FontSizeCombo({
+  valuePt,
+  onApply,
+}: {
+  valuePt: number | null;
+  onApply: (n: number) => void;
+}) {
+  // `draft` = o que está no input. `null` significa "espelhar a prop".
+  const [draft, setDraft] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const display = draft ?? (valuePt != null ? formatPt(valuePt) : "");
+
+  const commit = (raw: string) => {
+    const trimmed = raw.trim().replace(",", ".");
+    setDraft(null); // volta a espelhar a prop após commitar
+    if (!trimmed) return; // vazio → não mexe (mantém o atual)
+    const n = Number.parseFloat(trimmed);
+    if (!Number.isFinite(n)) return;
+    onApply(n);
+  };
+
+  // Fecha em clique-fora (mesma mecânica dos outros popovers da toolbar:
+  // ColorPickerBtn / InsertShapeMenu). O input em si vive dentro do wrap,
+  // então digitar/focar não fecha o popover.
+  useEffect(() => {
+    if (!open) return undefined;
+    const handler = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", handler);
+    return () => window.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const pick = (n: number) => {
+    setDraft(null);
+    setOpen(false);
+    onApply(n);
+    // Devolve o foco ao input pra o fluxo de digitação continuar natural.
+    requestAnimationFrame(() => inputRef.current?.focus());
+  };
+
+  return (
+    <div className={styles.sizeCombo} ref={wrapRef}>
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="decimal"
+        className={styles.sizeInput}
+        value={display}
+        aria-label="Tamanho da fonte (em pontos)"
+        title="Tamanho da fonte — digite qualquer número (pt) ou escolha na lista"
+        placeholder="—"
+        autoComplete="off"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls="sicro-font-size-listbox"
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            commit((e.target as HTMLInputElement).value);
+            setOpen(false);
+            (e.target as HTMLInputElement).blur();
+          } else if (e.key === "Escape") {
+            setDraft(null);
+            if (open) {
+              // Esc fecha o popover primeiro (sem perder o foco do input).
+              e.preventDefault();
+              setOpen(false);
+            } else {
+              (e.target as HTMLInputElement).blur();
+            }
+          } else if (e.key === "ArrowDown" && !open) {
+            // Seta pra baixo abre a lista (padrão de combobox).
+            e.preventDefault();
+            setOpen(true);
+          }
+        }}
+        onBlur={(e) => {
+          // Não commita se o blur foi pra dentro do popover (clique num
+          // tamanho) — o `pick` cuida disso. Sem essa guarda, o blur
+          // commitaria o texto digitado e o clique no item viria depois,
+          // gerando duas aplicações.
+          const next = e.relatedTarget as Node | null;
+          if (next && wrapRef.current?.contains(next)) return;
+          commit(e.target.value);
+        }}
+      />
+      <button
+        type="button"
+        className={styles.sizeCaret}
+        // mousedown em vez de click: dispara ANTES do blur do input, então
+        // o toggle vê o estado `open` correto (um clique fecha o que abriu).
+        onMouseDown={(e) => {
+          e.preventDefault(); // não rouba o foco do input
+          setOpen((v) => !v);
+        }}
+        aria-label="Mostrar tamanhos de fonte"
+        title="Mostrar tamanhos de fonte"
+        tabIndex={-1}
+      >
+        ▼
+      </button>
+      {open && (
+        <div
+          className={styles.sizeMenu}
+          role="listbox"
+          id="sicro-font-size-listbox"
+          aria-label="Tamanhos de fonte"
+        >
+          {FONT_SIZES_PT.map((s) => {
+            const isCurrent = valuePt != null && Math.abs(valuePt - s) < 0.001;
+            return (
+              <button
+                key={s}
+                type="button"
+                role="option"
+                aria-selected={isCurrent}
+                className={`${styles.sizeMenuItem} ${isCurrent ? styles.sizeMenuItemActive : ""}`}
+                // mousedown (não click) pra aplicar antes do blur do input.
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  pick(s);
+                }}
+              >
+                {formatPt(s)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// TextColorSwatch — seletor de cor do texto no MESMO visual do TextBox/Shape:
+// um swatch quadrado mostrando a cor atual + `<input type="color">` nativo por
+// cima. Botão "×" ao lado limpa a cor (unsetColor). O swatch reflete a cor do
+// cursor (vazio/sem cor → quadriculado de "transparente").
+// ============================================================================
+
+function TextColorSwatch({
+  current,
+  onSelect,
+  onClear,
+}: {
+  current: string;
+  onSelect: (hex: string) => void;
+  onClear: () => void;
+}) {
+  const hasColor = !!current;
+  return (
+    <span className={styles.textColorWrap}>
+      <label
+        className={styles.textColorSwatch}
+        style={
+          hasColor
+            ? { background: current }
+            : undefined /* sem cor → fundo quadriculado via CSS */
+        }
+        title={
+          hasColor ? `Cor do texto (${current})` : "Cor do texto"
+        }
+      >
+        <span className={styles.textColorGlyph} aria-hidden>
+          A
+        </span>
+        <input
+          type="color"
+          value={normalizeColor(current)}
+          aria-label="Cor do texto"
+          onChange={(e) => onSelect(e.target.value)}
+        />
+      </label>
+      <button
+        type="button"
+        className={styles.textColorClear}
+        onClick={onClear}
+        title="Remover cor do texto"
+        aria-label="Remover cor do texto"
+      >
+        ×
+      </button>
+    </span>
+  );
+}
+
+/** Normaliza cor pra `#RRGGBB` aceito por `<input type="color">`. */
+function normalizeColor(color: string): string {
+  if (!color) return "#000000";
+  if (/^#[0-9a-f]{6}$/i.test(color)) return color;
+  if (/^#[0-9a-f]{3}$/i.test(color)) {
+    const r = color[1];
+    const g = color[2];
+    const b = color[3];
+    return `#${r}${r}${g}${g}${b}${b}`;
+  }
+  return "#000000";
 }
 
 // ============================================================================
@@ -1212,27 +1533,39 @@ function InsertRegistrationBlockBtn({ editor }: { editor: Editor }) {
       }
       return node;
     };
-    const cell = (paras: Record<string, unknown>[]) => ({
+    // V2/F1.2 — colwidths explícitos (larga / média / estreita, estilo Word).
+    // Com `table-layout: fixed`, sem isto as 3 colunas ficariam iguais e o
+    // bloco de registro regrediria o visual. `borderStyle: "none"` mantém só
+    // o retângulo externo (sem grade interna), como o timbre do Word.
+    const widths = registrationBlockColWidths();
+    const cell = (paras: Record<string, unknown>[], colIdx: number) => ({
       type: "tableCell",
-      attrs: { colspan: 1, rowspan: 1, colwidth: null },
+      attrs: { colspan: 1, rowspan: 1, colwidth: [widths[colIdx]] },
       content: paras,
     });
     const table = {
       type: "table",
+      attrs: { id: generateTableId(), borderStyle: "none" },
       content: [
         {
           type: "tableRow",
           content: [
-            cell([
-              para("Registrado em ___/___/______."),
-              para("Ref. a REQ. nº ______"),
-              para("BO nº ______"),
-            ]),
-            cell([
-              para("LAUDO N° ______", { align: "center", bold: true }),
-              para("______/DC/PCA", { align: "center", bold: true }),
-            ]),
-            cell([para("Folha ___ de ___", { align: "center" })]),
+            cell(
+              [
+                para("Registrado em ___/___/______."),
+                para("Ref. a REQ. nº ______"),
+                para("BO nº ______"),
+              ],
+              0,
+            ),
+            cell(
+              [
+                para("LAUDO N° ______", { align: "center", bold: true }),
+                para("______/DC/PCA", { align: "center", bold: true }),
+              ],
+              1,
+            ),
+            cell([para("Folha ___ de ___", { align: "center" })], 2),
           ],
         },
       ],

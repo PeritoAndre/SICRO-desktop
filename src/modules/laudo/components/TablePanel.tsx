@@ -40,9 +40,11 @@ import {
   XCircle,
 } from "lucide-react";
 import {
+  buildSeededTableJson,
   buildTableList,
   extractTables,
   findTableTemplate,
+  generateTableId,
   TABLE_TEMPLATES,
   type NumberedTableEntry,
 } from "../document-engine";
@@ -100,11 +102,12 @@ export function TablePanel({ editor }: TablePanelProps) {
       setInsertOpen(false);
       return;
     }
-    editor
-      .chain()
-      .focus()
-      .insertTable({ rows, cols, withHeaderRow })
-      .run();
+    // F1.2 — Em vez do `insertTable` nativo (que cria células com
+    // colwidth=null → colapsam com table-layout:fixed), inserimos JSON com
+    // colwidths semeados + id estável (cross-refs/auto-numeração).
+    const table = buildSeededTableJson({ rows, cols, withHeaderRow });
+    table.attrs = { ...(table.attrs ?? {}), id: generateTableId() };
+    editor.chain().focus().insertContent(table).run();
     setInsertOpen(false);
   };
 

@@ -1,9 +1,11 @@
 /**
  * Walk a TipTap JSON doc and inject sequential numbers into every `figure`
- * node, then prepend "Figura N — " / "Croqui N — " to the existing caption.
+ * node (prepending "Figura N — " / "Croqui N — " to the figcaption) and into
+ * every `table` node (prepending "Tabela N — " to the table `caption` attr).
  *
  * Numbering is computed at render time (not persisted) so reordering blocks
- * in the editor doesn't require a save.
+ * in the editor doesn't require a save. Mirrors the live `AutoNumbering`
+ * decoration of the editor so the exported PDF/DOCX matches the screen.
  */
 
 import type { JSONContent } from "@tiptap/core";
@@ -11,10 +13,11 @@ import type { JSONContent } from "@tiptap/core";
 interface Counters {
   image: number;
   croqui: number;
+  table: number;
 }
 
 export function numberFigures(content: JSONContent): JSONContent {
-  const counters: Counters = { image: 0, croqui: 0 };
+  const counters: Counters = { image: 0, croqui: 0, table: 0 };
   return walk(content, counters);
 }
 
@@ -35,12 +38,37 @@ function walk(node: JSONContent, counters: Counters): JSONContent {
     };
   }
 
+  // F4 — Tabela: numera "Tabela N — " no attr `caption` (renderizado como
+  // `<caption>` pelo SicroTable). Numeração por ORDEM de aparição, igual ao
+  // AutoNumbering vivo. NÃO desce nas linhas (counters de tabela aninhada
+  // não fazem sentido aqui).
+  //
+  // EXCEÇÃO: tabelas SEM bordas (`borderStyle: "none"`) são tabelas de
+  // LAYOUT (bloco de registro/timbre), não exibições numeradas — não
+  // recebem número nem legenda automática.
+  if (node.type === "table") {
+    if ((node.attrs?.borderStyle as string | undefined) === "none") {
+      return node;
+    }
+    counters.table += 1;
+    const number = counters.table;
+    const existing = String(node.attrs?.caption ?? "");
+    const caption = prependCaptionText(existing, `Tabela ${number} — `);
+    return {
+      ...node,
+      attrs: { ...(node.attrs ?? {}), caption },
+    };
+  }
+
   if (!node.content) return node;
   return {
     ...node,
     content: node.content.map((child) => walk(child, counters)),
   };
 }
+
+/** Regex de prefixo já-presente (evita duplicar "Tabela 1 — Tabela 1 — …"). */
+const LABEL_PREFIX_RE = /^(Figura|Croqui|Tabela|Imagem|Quadro)\s+\d+\s*—/;
 
 function prependCaption(
   figcaption: JSONContent,
@@ -53,7 +81,7 @@ function prependCaption(
     firstText &&
     firstText.type === "text" &&
     typeof firstText.text === "string" &&
-    /^(Figura|Croqui|Tabela|Imagem)\s+\d+\s*—/.test(firstText.text)
+    LABEL_PREFIX_RE.test(firstText.text)
   ) {
     return figcaption;
   }
@@ -62,4 +90,10 @@ function prependCaption(
     ...figcaption,
     content: [{ type: "text", text: prefix }, ...existing],
   };
+}
+
+/** Versão pra string pura (attr `caption` da tabela). */
+function prependCaptionText(existing: string, prefix: string): string {
+  if (LABEL_PREFIX_RE.test(existing)) return existing;
+  return existing ? `${prefix}${existing}` : prefix.replace(/\s*—\s*$/, "");
 }

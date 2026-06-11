@@ -624,39 +624,213 @@ fn list_to_paragraphs(list_node: &Value, kind: ListKind) -> Vec<Paragraph> {
 // ===========================================================================
 // Tables
 
+/// F1.2 — 1 px de layout (96dpi) em twips (DXA). 1 px = 1/96 in; 1 in = 1440
+/// twips ⇒ 1 px = 15 twips. As `colwidth` do prosemirror-tables são px de
+/// layout; convertemos pra DXA pro `set_grid`/`TableCell::width` do docx-rs.
+fn px_to_twips(px: f64) -> usize {
+    (px * 15.0).round().max(1.0) as usize
+}
+
+/// Lê o atributo `attrs.colwidth` (array de px) de uma célula, retornando a
+/// soma em px (cobre colspan: prosemirror guarda 1 entrada por coluna).
+fn cell_colwidth_px(cell_node: &Value) -> Option<f64> {
+    let arr = cell_node
+        .get("attrs")
+        .and_then(|a| a.get("colwidth"))
+        .and_then(Value::as_array)?;
+    if arr.is_empty() {
+        return None;
+    }
+    let mut sum = 0.0;
+    let mut any = false;
+    for v in arr {
+        if let Some(n) = v.as_f64() {
+            sum += n;
+            any = true;
+        }
+    }
+    if any {
+        Some(sum)
+    } else {
+        None
+    }
+}
+
+/// Constrói o grid de colunas (larguras em DXA) a partir da PRIMEIRA linha.
+/// Cada coluna do grid corresponde a uma coluna lógica (expande colspans em
+/// fatias iguais). Retorna vazio se nenhuma largura estiver disponível (a
+/// tabela então sai em auto-layout, como antes).
+fn table_grid_from_first_row(first_row: &Value) -> Vec<usize> {
+    let mut grid: Vec<usize> = Vec::new();
+    for cell in children(first_row) {
+        let colspan = cell
+            .get("attrs")
+            .and_then(|a| a.get("colspan"))
+            .and_then(Value::as_u64)
+            .unwrap_or(1)
+            .max(1) as usize;
+        match cell_colwidth_px(&cell) {
+            Some(total_px) => {
+                // Reparte a largura total da célula igualmente pelas colunas
+                // que ela ocupa (colspan).
+                let per = total_px / colspan as f64;
+                for _ in 0..colspan {
+                    grid.push(px_to_twips(per));
+                }
+            }
+            None => return Vec::new(), // sem larguras → deixa auto-layout
+        }
+    }
+    grid
+}
+
 fn render_table(docx: Docx, table_node: &Value, ctx: &RenderCtx) -> Docx {
     let rows_json = children(table_node);
-    let mut rows: Vec<TableRow> = Vec::new();
+    let attrs = table_node.get("attrs");
+    let border_style = attrs
+        .and_then(|a| a.get("borderStyle"))
+        .and_then(Value::as_str)
+        .unwrap_or("all");
+    let table_align = attrs
+        .and_then(|a| a.get("tableAlign"))
+        .and_then(Value::as_str)
+        .unwrap_or("left");
+    let cell_padding_px = attrs
+        .and_then(|a| a.get("cellPadding"))
+        .and_then(Value::as_f64)
+        .unwrap_or(5.0);
 
+    let mut rows: Vec<TableRow> = Vec::new();
     for row_node in &rows_json {
         // We accept any row-shaped node (tableRow is the canonical kind, but
         // we don't gate on it — robustness over strictness for the spike).
         let cells_json = children(row_node);
         let mut cells: Vec<TableCell> = Vec::new();
         for cell_node in &cells_json {
-            // Accept both `tableCell` and `tableHeader`; same DOCX cell, the
-            // header attribute is currently not styled differently.
-            cells.push(build_table_cell(cell_node, ctx));
+            // Accept both `tableCell` and `tableHeader`; same DOCX cell. The
+            // header style is currently not different; colspan/valign/width
+            // ARE honoured now (F1.2/F4).
+            cells.push(build_table_cell(cell_node, ctx, cell_padding_px));
         }
         if !cells.is_empty() {
-            rows.push(TableRow::new(cells));
+            // F3 — altura de linha (data-height-cm ou attr rowHeight em cm).
+            let mut row = TableRow::new(cells);
+            if let Some(h_cm) = row_height_cm(row_node) {
+                // docx-rs row_height espera twips (1cm = 567 twips).
+                row = row
+                    .row_height((h_cm * 567.0) as f32)
+                    .height_rule(HeightRule::AtLeast);
+            }
+            rows.push(row);
         }
     }
 
     if rows.is_empty() {
         return docx;
     }
-    let docx = docx.add_table(Table::new(rows));
+
+    let mut table = Table::new(rows);
+    // F1.2 — Larguras de coluna (grid) a partir da primeira linha.
+    if let Some(first_row) = rows_json.first() {
+        let grid = table_grid_from_first_row(first_row);
+        if !grid.is_empty() {
+            table = table.set_grid(grid);
+        }
+    }
+    // F4 — Alinhamento da tabela.
+    table = match table_align {
+        "center" => table.align(TableAlignmentType::Center),
+        "right" => table.align(TableAlignmentType::Right),
+        _ => table.align(TableAlignmentType::Left),
+    };
+    // F4 — Bordas: "none" remove a grade interna (mantém o retângulo padrão
+    // do docx-rs, que já é só externo quando sem bordas internas). docx-rs
+    // por padrão desenha bordas; pra "none" limpamos as internas.
+    if border_style == "none" {
+        table = table
+            .clear_border(TableBorderPosition::InsideH)
+            .clear_border(TableBorderPosition::InsideV);
+    }
+
+    let docx = docx.add_table(table);
+    // F4 — Legenda da tabela (attr `caption`) como parágrafo itálico abaixo,
+    // espelhando o figcaption do Figure no DOCX (texto do perito; o prefixo
+    // "Tabela N —" é decoração viva do editor / numeração do render HTML).
+    let docx = if let Some(caption) = attrs
+        .and_then(|a| a.get("caption"))
+        .and_then(Value::as_str)
+        .filter(|c| !c.trim().is_empty())
+    {
+        docx.add_paragraph(
+            Paragraph::new()
+                .align(AlignmentType::Left)
+                .add_run(Run::new().add_text(caption).italic().size(20)),
+        )
+    } else {
+        docx
+    };
     // Trailing empty paragraph so subsequent blocks don't collapse into the table.
     docx.add_paragraph(empty_paragraph())
+}
+
+/// F3 — Altura de linha em cm. Aceita o attr novo `rowHeight` (número, cm) ou
+/// o legado `data-height-cm` (string) escrito pelo TablePropertiesDialog.
+fn row_height_cm(row_node: &Value) -> Option<f64> {
+    let attrs = row_node.get("attrs")?;
+    if let Some(n) = attrs.get("rowHeight").and_then(Value::as_f64) {
+        if n > 0.0 {
+            return Some(n);
+        }
+    }
+    if let Some(s) = attrs.get("data-height-cm").and_then(Value::as_str) {
+        let cleaned = s.trim().trim_end_matches("cm").trim();
+        if let Ok(n) = cleaned.parse::<f64>() {
+            if n > 0.0 {
+                return Some(n);
+            }
+        }
+    }
+    None
 }
 
 /// Convert the children of a table cell into DOCX paragraphs. Unlike the
 /// previous version, we recognise block kinds (storyboard / figure / list)
 /// and flatten them into the cell as a sequence of paragraphs rather than
 /// routing them through `paragraph_from_inline` (which would drop their text).
-fn build_table_cell(cell_node: &Value, ctx: &RenderCtx) -> TableCell {
+fn build_table_cell(cell_node: &Value, ctx: &RenderCtx, _cell_padding_px: f64) -> TableCell {
     let mut cell = TableCell::new();
+    let attrs = cell_node.get("attrs");
+
+    // F4 — colspan → grid_span (antes era ignorado; tabelas com células
+    // mescladas saíam desalinhadas no DOCX).
+    if let Some(colspan) = attrs.and_then(|a| a.get("colspan")).and_then(Value::as_u64) {
+        if colspan > 1 {
+            cell = cell.grid_span(colspan as usize);
+        }
+    }
+    // F1.2 — largura da célula (DXA) a partir da colwidth (px).
+    if let Some(px) = cell_colwidth_px(cell_node) {
+        cell = cell.width(px_to_twips(px), WidthType::Dxa);
+    }
+    // F4 — alinhamento vertical do conteúdo (data-valign do dialog).
+    match attrs.and_then(|a| a.get("data-valign")).and_then(Value::as_str) {
+        Some("middle") => cell = cell.vertical_align(VAlignType::Center),
+        Some("bottom") => cell = cell.vertical_align(VAlignType::Bottom),
+        _ => {}
+    }
+    // Cor de FUNDO da célula (attr `backgroundColor` — sombreado estilo Word).
+    // Emite `<w:shd w:fill="RRGGBB">` (CellShading) só quando há cor válida;
+    // "sem cor"/transparente NÃO emite nada (fundo padrão). Funciona pelo
+    // attr no JSON — clone estático do cabeçalho/rodapé incluso —, não só pelo
+    // NodeView, porque o walker lê direto o JSON ProseMirror salvo.
+    if let Some(hex) = attrs
+        .and_then(|a| a.get("backgroundColor"))
+        .and_then(Value::as_str)
+        .and_then(css_color_to_hex)
+    {
+        cell = cell.shading(Shading::new().shd_type(ShdType::Clear).color("auto").fill(hex));
+    }
+
     let inner_children = children(cell_node);
 
     if inner_children.is_empty() {
@@ -1537,6 +1711,63 @@ fn css_first_family(v: &str) -> Option<String> {
     }
 }
 
+/// Converte uma cor CSS (`#RGB`, `#RRGGBB`, `rgb()/rgba()`) em hex `RRGGBB`
+/// (UPPERCASE, sem `#`) — o formato que o OOXML `<w:shd w:fill="…">` espera.
+///
+/// Devolve `None` para "sem cor" (vazio, `transparent`, `none`) ou entrada
+/// inválida — nesses casos a célula NÃO recebe sombreado (fundo padrão do
+/// Word), preservando a regra "default = transparente" dos docs antigos.
+/// `rgba(...)` com alpha 0 também é tratado como "sem cor".
+fn css_color_to_hex(value: &str) -> Option<String> {
+    let v = value.trim();
+    if v.is_empty() || v.eq_ignore_ascii_case("transparent") || v.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    if let Some(hex) = v.strip_prefix('#') {
+        let hex = hex.trim();
+        match hex.len() {
+            6 if hex.chars().all(|c| c.is_ascii_hexdigit()) => {
+                return Some(hex.to_uppercase());
+            }
+            3 if hex.chars().all(|c| c.is_ascii_hexdigit()) => {
+                // #RGB → #RRGGBB
+                let mut out = String::with_capacity(6);
+                for c in hex.chars() {
+                    out.push(c);
+                    out.push(c);
+                }
+                return Some(out.to_uppercase());
+            }
+            _ => return None,
+        }
+    }
+    // rgb()/rgba()
+    let lower = v.to_ascii_lowercase();
+    if let Some(inner) = lower
+        .strip_prefix("rgba(")
+        .or_else(|| lower.strip_prefix("rgb("))
+        .and_then(|s| s.strip_suffix(')'))
+    {
+        let parts: Vec<&str> = inner.split(',').map(|p| p.trim()).collect();
+        if parts.len() < 3 {
+            return None;
+        }
+        // alpha 0 → "sem cor" (não emite shading).
+        if parts.len() >= 4 {
+            if let Ok(a) = parts[3].parse::<f64>() {
+                if a <= 0.0 {
+                    return None;
+                }
+            }
+        }
+        let r = parts[0].parse::<u32>().ok()?.min(255);
+        let g = parts[1].parse::<u32>().ok()?.min(255);
+        let b = parts[2].parse::<u32>().ok()?.min(255);
+        return Some(format!("{r:02X}{g:02X}{b:02X}"));
+    }
+    None
+}
+
 // ===========================================================================
 // Generic helpers
 
@@ -1561,6 +1792,54 @@ fn paragraph_alignment(node: &Value) -> Option<AlignmentType> {
         "right" => Some(AlignmentType::Right),
         "justify" => Some(AlignmentType::Both),
         _ => Some(AlignmentType::Left),
+    }
+}
+
+// ===========================================================================
+// Testes — cor de fundo de célula (CSS → hex p/ <w:shd>).
+
+#[cfg(test)]
+mod cell_bg_tests {
+    use super::css_color_to_hex;
+
+    #[test]
+    fn hex_6_digits_uppercased() {
+        assert_eq!(css_color_to_hex("#ffcc00").as_deref(), Some("FFCC00"));
+        assert_eq!(css_color_to_hex("#1A2B3C").as_deref(), Some("1A2B3C"));
+    }
+
+    #[test]
+    fn hex_3_digits_expanded() {
+        assert_eq!(css_color_to_hex("#fc0").as_deref(), Some("FFCC00"));
+        assert_eq!(css_color_to_hex("#abc").as_deref(), Some("AABBCC"));
+    }
+
+    #[test]
+    fn rgb_and_rgba_converted() {
+        assert_eq!(css_color_to_hex("rgb(255, 204, 0)").as_deref(), Some("FFCC00"));
+        assert_eq!(
+            css_color_to_hex("rgba(26, 43, 60, 1)").as_deref(),
+            Some("1A2B3C")
+        );
+    }
+
+    #[test]
+    fn no_color_inputs_return_none() {
+        // Default (sem cor) NÃO deve emitir shading.
+        assert!(css_color_to_hex("").is_none());
+        assert!(css_color_to_hex("   ").is_none());
+        assert!(css_color_to_hex("transparent").is_none());
+        assert!(css_color_to_hex("none").is_none());
+        // rgba com alpha 0 = transparente.
+        assert!(css_color_to_hex("rgba(255,0,0,0)").is_none());
+    }
+
+    #[test]
+    fn invalid_inputs_return_none() {
+        assert!(css_color_to_hex("#12").is_none());
+        assert!(css_color_to_hex("#xyzxyz").is_none());
+        assert!(css_color_to_hex("notacolor").is_none());
+        assert!(css_color_to_hex("rgb(1,2)").is_none());
     }
 }
 

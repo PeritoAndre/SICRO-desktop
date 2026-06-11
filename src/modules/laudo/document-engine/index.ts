@@ -165,7 +165,27 @@ export {
   type TableTemplateDefinition,
   type TableEntry,
   type NumberedTableEntry,
+  // F1.2 — Geração de larguras de coluna (colwidth) padrão.
+  seedEqualColWidths,
+  seedWeightedColWidths,
+  registrationBlockColWidths,
+  buildSeededTableJson,
+  DEFAULT_TABLE_CONTENT_WIDTH_PX,
+  MIN_SEEDED_COL_WIDTH_PX,
 } from "./tables";
+
+// F1.2/F4 — Tabela de primeira classe (id + legenda + bordas/align/padding).
+export {
+  SicroTable,
+  generateTableId,
+  tablePresentationStyle,
+  tablePresentationDataAttrs,
+  DEFAULT_TABLE_BORDER_COLOR,
+  DEFAULT_TABLE_BORDER_WIDTH,
+  DEFAULT_TABLE_CELL_PADDING,
+  type TableAlign,
+  type TableBorderStyle,
+} from "./nodes";
 
 // F4 — Sistema de estilos documentais (12+ estilos).
 export {

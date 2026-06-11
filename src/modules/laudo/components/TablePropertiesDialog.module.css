@@ -199,6 +199,21 @@
   line-height: 1.5;
 }
 
+/* F4 — Linha de checkbox (toggle de bordas / cabeçalho). */
+.checkRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+  color: var(--sicro-fg);
+  cursor: pointer;
+}
+.checkRow input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
 .footer {
   display: flex;
   justify-content: flex-end;
