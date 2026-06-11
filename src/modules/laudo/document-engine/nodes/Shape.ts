@@ -72,14 +72,14 @@ function renderShapeSvgString(
   switch (kind) {
     case "rectangle":
       return (
-        `<svg viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="none" width="100%" height="100%">` +
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="none" width="100%" height="100%">` +
         `<rect x="${inset}" y="${inset}" width="${vbW - sw}" height="${vbH - sw}" ` +
         `stroke="${strokeColor}" stroke-width="${sw}" fill="${fillColor}" />` +
         `</svg>`
       );
     case "ellipse":
       return (
-        `<svg viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="none" width="100%" height="100%">` +
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="none" width="100%" height="100%">` +
         `<ellipse cx="${vbW / 2}" cy="${vbH / 2}" rx="${vbW / 2 - inset}" ry="${vbH / 2 - inset}" ` +
         `stroke="${strokeColor}" stroke-width="${sw}" fill="${fillColor}" />` +
         `</svg>`
@@ -89,7 +89,7 @@ function renderShapeSvgString(
       // markerUnits="strokeWidth" → arrowhead escala com stroke. refX=9 alinha a ponta no final da linha.
       const tipX = vbW - sw * 4; // recua a ponta da linha pra arrowhead caber dentro do viewBox
       return (
-        `<svg viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="none" width="100%" height="100%">` +
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="none" width="100%" height="100%">` +
         `<defs>` +
         `<marker id="arrowhead-${uniqueId}" markerWidth="10" markerHeight="10" ` +
         `refX="9" refY="5" orient="auto" markerUnits="strokeWidth">` +
@@ -105,7 +105,7 @@ function renderShapeSvgString(
     case "line":
       // Linha simples horizontal — user rotaciona se quiser diagonal.
       return (
-        `<svg viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="none" width="100%" height="100%">` +
+        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${vbW} ${vbH}" preserveAspectRatio="none" width="100%" height="100%">` +
         `<line x1="0" y1="${vbH / 2}" x2="${vbW}" y2="${vbH / 2}" ` +
         `stroke="${strokeColor}" stroke-width="${sw}" />` +
         `</svg>`
@@ -227,15 +227,26 @@ export const Shape = Node.create({
       draggable: wrapMode === "inline" ? "true" : "false",
     };
     if (id) extra["data-shape-id"] = id;
-    // O conteúdo SVG é serializado como string HTML interna via attrs do PM
-    // — `innerHTML` direto não dá em renderHTML porque PM espera tree. Usamos
-    // dangerouslySetInnerHTML via NodeView, mas pra serialização precisamos
-    // emitir o SVG. Solução: armazenar como atributo `data-svg` e o NodeView
-    // recria a string. Pra HTML export, o renderHTML emite o SVG inline.
-    // Aqui retornamos só o wrapper — o NodeView injetará o SVG.
+    // Serialização ESTÁTICA (clone do cabeçalho/rodapé fora do modo edição +
+    // export HTML/PDF/DOCX via generateHTML): emitimos o SVG como um <img> com
+    // data-URI. Antes o SVG ia só no atributo `data-svg-string` e o div saía
+    // VAZIO — então a forma sumia no clone e no export, aparecendo apenas no
+    // editor AO VIVO (onde o NodeView injeta o SVG via innerHTML). Um <img> com
+    // o SVG embutido renderiza em qualquer contexto HTML e evita o problema de
+    // namespace que o SVG inline teria no DOMOutputSpec do ProseMirror.
+    const svgDataUri = `data:image/svg+xml,${encodeURIComponent(svgString)}`;
     return [
       "div",
       mergeAttributes(HTMLAttributes, extra, { "data-svg-string": svgString }),
+      [
+        "img",
+        {
+          src: svgDataUri,
+          alt: "",
+          "aria-hidden": "true",
+          style: "display:block; width:100%; height:100%; pointer-events:none;",
+        },
+      ],
     ];
   },
 

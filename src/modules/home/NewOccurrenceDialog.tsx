@@ -20,6 +20,7 @@ interface NewOccurrenceDialogProps {
 interface FormState {
   numero_bo: string;
   protocolo: string;
+  oficio: string;
   tipo_pericia: string;
   municipio: string;
   peritos: string;
@@ -29,6 +30,7 @@ interface FormState {
 const empty: FormState = {
   numero_bo: "",
   protocolo: "",
+  oficio: "",
   tipo_pericia: "",
   municipio: "",
   peritos: "",
@@ -96,6 +98,7 @@ export function NewOccurrenceDialog({
     const input: NewOccurrenceInput = {
       numero_bo: form.numero_bo.trim() || null,
       protocolo: form.protocolo.trim() || null,
+      oficio: form.oficio.trim() || null,
       tipo_pericia: form.tipo_pericia.trim() || null,
       municipio: form.municipio.trim() || null,
       peritos,
@@ -145,7 +148,7 @@ export function NewOccurrenceDialog({
           }}
         >
           <label htmlFor="protocolo" className={styles.label}>
-            Protocolo do ofício <strong>(nº do laudo)</strong>
+            Número do Protocolo <strong>(nº do laudo)</strong>
           </label>
           <input
             id="protocolo"
@@ -157,7 +160,26 @@ export function NewOccurrenceDialog({
             autoFocus
           />
           <p className={styles.hint}>
-            Número que o ofício recebeu no protocolo — é o identificador do laudo.
+            Gerado pela Polícia Científica no registro — é o identificador do laudo.
+          </p>
+        </div>
+
+        <div className={styles.field}>
+          <label htmlFor="oficio" className={styles.label}>
+            Número do Ofício{" "}
+            <span style={{ opacity: 0.6, fontWeight: 400 }}>(opcional)</span>
+          </label>
+          <input
+            id="oficio"
+            type="text"
+            className={styles.input}
+            placeholder="Ex.: 1234/2026"
+            value={form.oficio}
+            onChange={(e) => setField("oficio", e.target.value)}
+          />
+          <p className={styles.hint}>
+            Número que a Polícia Civil deu ao ofício de requisição (origem externa) —
+            diferente do protocolo.
           </p>
         </div>
 

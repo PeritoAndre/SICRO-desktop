@@ -100,43 +100,43 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 /**
- * Extrai os itens de imagem do `DataTransfer` do evento `paste`.
- * Combina `files` (arquivo real do Explorer) e `items` (bitmap raw)
- * pra cobrir ambos os caminhos. Deduplica por referência.
+ * Extrai as imagens do `DataTransfer` do evento `paste`.
+ *
+ * Usa `files` OU `items` — NUNCA os dois juntos. Um bitmap colado do clipboard
+ * (screenshot, "copiar imagem" do navegador) costuma aparecer nos DOIS, e como
+ * cada `item.getAsFile()` cria um `File` NOVO, mesclar os dois inseria a foto
+ * DUPLICADA (o dedup por referência não reconhece objetos distintos de mesmo
+ * conteúdo). Por isso: se `files` já traz imagem, usa só ela; senão, cai para
+ * `items` (caso do bitmap raw que aparece apenas ali).
  */
 function collectImageFiles(dt: DataTransfer | null): File[] {
   if (!dt) return [];
-  const collected: File[] = [];
-  const seen = new Set<File>();
 
-  // 1) DataTransfer.files — Explorer copy entrega aqui.
+  // 1) DataTransfer.files — Explorer copy entrega aqui; a maioria dos
+  //    navegadores/clipboard de bitmap raw TAMBÉM duplica a imagem aqui.
+  const fromFiles: File[] = [];
   if (dt.files && dt.files.length > 0) {
     for (let i = 0; i < dt.files.length; i++) {
       const f = dt.files[i];
-      if (f && f.type.startsWith("image/") && !seen.has(f)) {
-        seen.add(f);
-        collected.push(f);
-      }
+      if (f && f.type.startsWith("image/")) fromFiles.push(f);
     }
   }
+  if (fromFiles.length > 0) return fromFiles;
 
-  // 2) DataTransfer.items — bitmap raw entrega aqui (kind="file",
-  //    type="image/png", e o `.getAsFile()` produz um File sintético).
+  // 2) Fallback: bitmap raw que aparece SÓ em `items` (kind="file",
+  //    type="image/*"); `getAsFile()` produz um File sintético.
+  const fromItems: File[] = [];
   if (dt.items && dt.items.length > 0) {
     for (let i = 0; i < dt.items.length; i++) {
       const item = dt.items[i];
       if (!item) continue;
       if (item.kind === "file" && item.type.startsWith("image/")) {
         const f = item.getAsFile();
-        if (f && !seen.has(f)) {
-          seen.add(f);
-          collected.push(f);
-        }
+        if (f) fromItems.push(f);
       }
     }
   }
-
-  return collected;
+  return fromItems;
 }
 
 export function usePasteImage(options: UsePasteImageOptions): PasteImageState {

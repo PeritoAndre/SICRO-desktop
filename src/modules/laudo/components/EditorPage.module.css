@@ -494,6 +494,15 @@
   pointer-events: none;
   user-select: none;
 }
+/* Objetos com cor/imagem PRÓPRIA (forma SVG, caixa de texto, foto) não
+ * respondem ao `color` cinza acima — então ficavam em destaque total enquanto
+ * o texto esmaecia. Esmaece-os por `opacity` pra acompanharem o mesmo
+ * "apagamento leve" quando o corpo está sob o modo cabeçalho. */
+.editorWrapDimmed :global([data-sicro-shape]),
+.editorWrapDimmed :global([data-sicro-textbox]),
+.editorWrapDimmed :global(figure[data-sicro-figure]) {
+  opacity: 0.4 !important;
+}
 
 .editorWrap :global(.sicro-editor-content) {
   outline: none;

@@ -14,6 +14,7 @@ import type {
   NewOccurrenceInput,
   Occurrence,
   OccurrenceEdit,
+  OccurrenceStatus,
   RecentOccurrence,
 } from "@domain/occurrence";
 import {
@@ -72,6 +73,11 @@ interface WorkspaceState {
    * Palavra final do perito; também atualiza recentes + índice global de casos.
    */
   updateActiveOccurrence: (edit: OccurrenceEdit) => Promise<Occurrence>;
+  /**
+   * Muda SÓ o status do caso ativo (concluir/reabrir) via comando dedicado —
+   * sem o risco de zerar campos do cabeçalho. Atualiza UI + recentes + índice.
+   */
+  setActiveStatus: (status: OccurrenceStatus) => Promise<Occurrence>;
   closeOccurrence: () => void;
   forgetRecent: (workspaceId: string) => Promise<void>;
   /**
@@ -175,6 +181,34 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       const occurrence = await commands.updateOccurrence(workspacePath, edit);
       set({ activeOccurrence: occurrence, isMutating: false });
       // Rótulo/tipo/município podem ter mudado → atualiza recentes + índice.
+      void get().loadRecents();
+      indexCase(
+        { occurrence, workspace_path: workspacePath },
+        () => get().bumpCaseIndex(),
+      );
+      return occurrence;
+    } catch (err) {
+      const e = toSicroError(err);
+      set({ isMutating: false, lastError: e });
+      throw e;
+    }
+  },
+
+  async setActiveStatus(status) {
+    const workspacePath = get().activeWorkspacePath;
+    if (!workspacePath) {
+      const e = toSicroError(new Error("nenhuma ocorrência ativa"));
+      set({ lastError: e });
+      throw e;
+    }
+    set({ isMutating: true, lastError: null });
+    try {
+      const occurrence = await commands.setOccurrenceStatus(
+        workspacePath,
+        status,
+      );
+      set({ activeOccurrence: occurrence, isMutating: false });
+      // Status mudou → reflete em recentes + índice global (badge na Home/Histórico).
       void get().loadRecents();
       indexCase(
         { occurrence, workspace_path: workspacePath },

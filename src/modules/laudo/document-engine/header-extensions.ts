@@ -54,6 +54,11 @@ import { FontSize } from "./marks/FontSize";
 import { Figure, FigCaption } from "./nodes/Figure";
 // U — TextBox: caixa de texto editável também disponível no cabeçalho.
 import { TextBox } from "./nodes/TextBox";
+// Q — Shape: formas geométricas (retângulo, elipse, seta, linha) também no
+// cabeçalho. Sem o nó aqui, `insertShape` não existia no editor do header e a
+// forma simplesmente não era criada. Necessário também pro renderer (que usa
+// estas mesmas extensões pra serializar o cabeçalho no HTML/PDF exportado).
+import { Shape } from "./nodes/Shape";
 import { ParagraphFirstLineIndent } from "./paragraph-indent";
 import { ParagraphSpacing } from "./paragraph-spacing";
 // Campos automáticos `{campo}` + autocomplete por `{` — também no cabeçalho/
@@ -107,6 +112,8 @@ export function headerExtensions(
     FigCaption,
     // U — TextBox no header também (mesmo tratamento que no body).
     TextBox,
+    // Q — Shape no header também: habilita `insertShape` + serialização.
+    Shape,
     ParagraphFirstLineIndent,
     ParagraphSpacing,
     // Campos automáticos + autocomplete por `{` no cabeçalho/rodapé.

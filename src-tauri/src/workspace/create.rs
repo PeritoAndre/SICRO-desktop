@@ -102,7 +102,7 @@ pub fn create_workspace(
         numero_bo: input.numero_bo.filter(|s| !s.trim().is_empty()),
         protocolo: input.protocolo.filter(|s| !s.trim().is_empty()),
         requisicao: None,
-        oficio: None,
+        oficio: input.oficio.filter(|s| !s.trim().is_empty()),
         delegacia: None,
         tipo_pericia: input.tipo_pericia.filter(|s| !s.trim().is_empty()),
         natureza: None,

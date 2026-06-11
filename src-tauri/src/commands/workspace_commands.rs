@@ -98,6 +98,9 @@ pub async fn update_occurrence(
             occ.status = st;
         }
     }
+    // Mantém a data de encerramento coerente com o status (estampa ao concluir,
+    // limpa ao reabrir). Verdade temporal — não inventa data.
+    apply_status_side_effects(&mut occ);
     if let Some(peritos) = edit.peritos {
         occ.peritos = peritos
             .into_iter()
@@ -133,6 +136,59 @@ fn none_if_blank(v: Option<String>) -> Option<String> {
             Some(t.to_string())
         }
     })
+}
+
+/// Mantém `data_encerramento` coerente com o status: estampa ao concluir (se
+/// ainda vazio) e limpa ao reabrir (aberta / em andamento). "Arquivada" preserva
+/// o que houver. Não inventa data — usa o relógio do sistema no momento da ação.
+fn apply_status_side_effects(occ: &mut Occurrence) {
+    match occ.status {
+        OccurrenceStatus::Concluida => {
+            if occ.data_encerramento.is_none() {
+                occ.data_encerramento = Some(Utc::now());
+            }
+        }
+        OccurrenceStatus::Aberta | OccurrenceStatus::EmAndamento => {
+            occ.data_encerramento = None;
+        }
+        OccurrenceStatus::Arquivada => {}
+    }
+}
+
+/// Muda APENAS o status da ocorrência (concluir / reabrir) — diferente de
+/// `update_occurrence`, que reescreve o cabeçalho inteiro (e zeraria campos não
+/// enviados). Estampa/limpa a data de encerramento conforme o status. O perito é
+/// a palavra final; a proveniência (import_id, raw_*) nunca é tocada.
+#[tauri::command]
+pub async fn set_occurrence_status(
+    state: State<'_, AppState>,
+    workspace_path: String,
+    status: String,
+) -> Result<Occurrence> {
+    let path = PathBuf::from(&workspace_path);
+    let opened = open_workspace(&path)?;
+    let mut occ = opened.occurrence;
+
+    let st = OccurrenceStatus::parse(&status)
+        .ok_or_else(|| SicroError::Validation(format!("status inválido: {status}")))?;
+    occ.status = st;
+    apply_status_side_effects(&mut occ);
+    occ.updated_at = Utc::now();
+
+    let conn = open_connection(&path.join(SQLITE_FILENAME))?;
+    occurrence_repo::update_full(&conn, &occ)?;
+    let _ = occurrence_repo::record_audit(
+        &conn,
+        Some(&occ.id),
+        "occurrence.status",
+        Some("home"),
+        None,
+        None,
+        None,
+    );
+
+    state.upsert_recent(&occ, &workspace_path, opened.manifest.workspace_id)?;
+    Ok(occ)
 }
 
 #[tauri::command]

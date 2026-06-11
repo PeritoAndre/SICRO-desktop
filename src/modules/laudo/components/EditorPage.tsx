@@ -277,7 +277,21 @@ export function EditorPage({
       });
     }
     setEditingRegion("header");
-  }, [headerEnabled, headerContent, onHeaderChange, setEditingRegion]);
+    // "Só abrir" — NUNCA selecionar tudo. O duplo-clique nativo deixava uma
+    // seleção (DOM/PM) abrangendo o cabeçalho inteiro. Num rAF (após o editor
+    // virar editable) limpamos a seleção do navegador e colapsamos o cursor no
+    // fim do conteúdo do cabeçalho.
+    requestAnimationFrame(() => {
+      window.getSelection()?.removeAllRanges();
+      headerEditor?.commands.focus("end");
+    });
+  }, [
+    headerEnabled,
+    headerContent,
+    onHeaderChange,
+    setEditingRegion,
+    headerEditor,
+  ]);
 
   // Volta para modo body — chamado pelo botão "✕" (N16) ou Esc.
   const deactivateHeader = useCallback(() => {
@@ -653,7 +667,13 @@ export function EditorPage({
     valueCm: number,
   ) => {
     if (!onLayoutChange) return;
-    const individuallyClamped = Math.max(0, Math.min(8, valueCm));
+    // Piso da margem SUPERIOR = altura do cabeçalho (quando ligado): o texto não
+    // pode começar ACIMA da base do cabeçalho, senão sobreporia o timbre. O teto
+    // sobe junto se o cabeçalho passar de 8cm (até 10cm). Demais lados: 0–8.
+    const topFloor = headerEnabled ? headerHeightCm : 0;
+    const lo = which === "top" ? topFloor : 0;
+    const hi = which === "top" ? Math.max(8, topFloor) : 8;
+    const individuallyClamped = Math.max(lo, Math.min(hi, valueCm));
 
     // Coleta o estado projetado (com a alteração pendente).
     let nextTop = which === "top" ? individuallyClamped : margins.top;
@@ -887,6 +907,7 @@ export function EditorPage({
             pageGapCm={PAGE_GAP_CM}
             topMarginCm={margins.top}
             bottomMarginCm={margins.bottom}
+            minTopMarginCm={headerEnabled ? headerHeightCm : 0}
             onTopMarginChange={
               onLayoutChange
                 ? (v) => handleMarginChange("top", v)
@@ -979,24 +1000,18 @@ export function EditorPage({
                 onActivate={activateHeader}
                 onHeightChange={(cm) => {
                   if (!onLayoutChange) return;
-                  // N17 — Auto-acoplamento margin.top ↔ header_height_cm.
-                  // Versão simétrica (pós-laudo T):
-                  //   - Header CRESCE além da margem → margin cresce junto
-                  //     (igual antes, "modelo Word").
-                  //   - Header ENCOLHE com margin sincronizada → margin
-                  //     encolhe junto. Antes só crescia, então uma vez que
-                  //     o user expandia pra 10cm não conseguia mais voltar
-                  //     o body pra cima (a linha demarcadora ia, mas a
-                  //     margem ficava grudada no max já atingido).
-                  //   - Header ENCOLHE com margin manual MAIOR (gap
-                  //     deliberado) → margin é PRESERVADA. O user manteve
-                  //     um gap entre header e body via Inspector → respeita.
-                  //
-                  // "Sincronizada" = margins.top ≈ headerHeightCm atual.
-                  const wasSynced =
-                    Math.abs(margins.top - headerHeightCm) < 0.01;
-                  const shouldSyncMargin =
-                    cm > margins.top + 0.005 || wasSynced;
+                  // Auto-acoplamento margin.top ↔ header_height_cm — DIREÇÃO
+                  // ÚNICA (modelo Word, ajustado a pedido do perito):
+                  //   - Header CRESCE além da margem → empurra a margem pra
+                  //     baixo (senão o texto começaria DENTRO do cabeçalho).
+                  //   - Header ENCOLHE (barra azul sobe) → a margem NÃO sobe
+                  //     junto: fica onde está, abrindo um respiro entre o
+                  //     cabeçalho e o texto. (Antes sincronizava nos dois
+                  //     sentidos via `wasSynced`, então era impossível deixar
+                  //     esse espaço.) Para reaproximar o texto do cabeçalho, o
+                  //     perito arrasta a barra AMARELA (margem), que tem piso
+                  //     na base do cabeçalho — nunca o invade.
+                  const shouldSyncMargin = cm > margins.top + 0.005;
                   if (shouldSyncMargin) {
                     onLayoutChange({
                       header_height_cm: cm,

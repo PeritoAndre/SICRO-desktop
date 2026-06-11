@@ -96,6 +96,10 @@ pub struct Occurrence {
 pub struct NewOccurrenceInput {
     pub numero_bo: Option<String>,
     pub protocolo: Option<String>,
+    /// Nº do ofício de requisição da Polícia Civil (origem externa) — distinto
+    /// do `protocolo` (gerado na Polícia Científica e usado como nº do laudo).
+    #[serde(default)]
+    pub oficio: Option<String>,
     pub tipo_pericia: Option<String>,
     pub municipio: Option<String>,
     #[serde(default)]

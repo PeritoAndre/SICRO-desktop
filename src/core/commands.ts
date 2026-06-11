@@ -12,6 +12,7 @@ import type {
   NewOccurrenceInput,
   Occurrence,
   OccurrenceEdit,
+  OccurrenceStatus,
   RecentOccurrence,
 } from "@domain/occurrence";
 import type { Laudo, LaudoDocPayload, NewLaudoInput } from "@domain/laudo";
@@ -165,6 +166,21 @@ export const commands = {
     edit: OccurrenceEdit,
   ): Promise<Occurrence> {
     return safeInvoke<Occurrence>("update_occurrence", { workspacePath, edit });
+  },
+
+  /**
+   * Muda SÓ o status da ocorrência (concluir / reabrir) — sem tocar no cabeçalho.
+   * Comando dedicado: não corre o risco de zerar campos não enviados como o
+   * update_occurrence faria com um patch parcial.
+   */
+  setOccurrenceStatus(
+    workspacePath: string,
+    status: OccurrenceStatus,
+  ): Promise<Occurrence> {
+    return safeInvoke<Occurrence>("set_occurrence_status", {
+      workspacePath,
+      status,
+    });
   },
 
   /** Returns the list of recently opened workspaces (newest first). */

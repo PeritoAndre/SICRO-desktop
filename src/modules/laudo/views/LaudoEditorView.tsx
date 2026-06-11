@@ -348,6 +348,11 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
   const selectedHeaderFigure = useSelectedFigure(headerEditor);
   // U — TextBox no header também (mesma instrumentação).
   const selectedHeaderTextBox = useSelectedTextBox(headerEditor);
+  // Q — Forma (shape) no header também. Sem isto, uma forma inserida no
+  // cabeçalho ficava SEM overlay (handles) — entrava no doc mas não dava pra
+  // selecionar/mover/girar. A inserção já mirava o headerEditor (toolbar U1);
+  // faltava só o overlay espelhado, como o TextBox já tinha.
+  const selectedHeaderShape = useSelectedShape(headerEditor);
 
   // W (fase 2b) — referência opcional ao editor TipTap do RODAPÉ, simétrico
   // ao headerEditor. EditorPage instancia via `useFooterEditor` e entrega
@@ -1057,6 +1062,13 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
               selected={selectedShape}
               containerRef={editorRegionRef}
             />
+            {headerEditor && (
+              <ShapeOverlay
+                editor={headerEditor}
+                selected={selectedHeaderShape}
+                containerRef={editorRegionRef}
+              />
+            )}
             {/* U — TextBox overlay: handles + toolbar com controles de
                 border/fill/rotação. Body + header (2 instâncias). */}
             <TextBoxOverlay

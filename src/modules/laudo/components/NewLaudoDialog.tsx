@@ -16,7 +16,7 @@
  *   oficial sem precisar configurar nada manualmente.
  */
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Dialog } from "@components/Dialog/Dialog";
 import { Button } from "@components/Button/Button";
 import { useLaudoStore } from "../store/laudoStore";
@@ -70,10 +70,21 @@ export function NewLaudoDialog({
     onClose();
   };
 
-  // Reset suggested title whenever the dialog reopens with a new suggestion.
-  if (open && title === "" && suggestedTitle) {
-    setTitle(suggestedTitle);
-  }
+  // Re-semeia os campos sempre que o diálogo ABRE — não a cada render. O reset
+  // anterior era condicionado a `title === ""`, então reinjetava o título toda
+  // vez que o campo ficava vazio (impossível apagar o nome com Backspace). Agora
+  // o reseed só ocorre na transição fechado→aberto.
+  useEffect(() => {
+    if (open) {
+      setTitle(suggestedTitle);
+      setTemplateId(DEFAULT_TEMPLATE_ID);
+      setNumeroLaudo("");
+      setError(null);
+    }
+    // Intencional: dependemos só de `open`. Incluir `suggestedTitle` reseedaria
+    // no meio da digitação caso o pai recomputasse a sugestão.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();

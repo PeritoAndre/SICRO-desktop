@@ -31,22 +31,20 @@ import {
   Crosshair,
   Database,
   Download,
-  FileImage,
   FileText,
   FolderArchive,
   FolderOpen,
   Info,
-  Map as MapIcon,
+  LogOut,
   MapPin,
   MoreHorizontal,
   Plus,
-  ScanSearch,
+  RotateCcw,
   Search,
   Shield,
   ShieldAlert,
   ShieldCheck,
   Trash2,
-  Video,
   WifiOff,
   X,
 } from "lucide-react";
@@ -70,38 +68,20 @@ import type { Occurrence, OccurrenceStatus } from "@domain/occurrence";
 import type { SystemHealthSnapshot } from "@domain/alpha";
 import styles from "./HomeView.module.css";
 
-interface ModuleDef {
-  to: string;
-  icon: ReactNode;
-  name: string;
-  desc: string;
-}
-
-/** Módulos acessíveis a partir da ocorrência ativa (rotas reais do App). */
-const MODULES: ModuleDef[] = [
-  { to: "/dossie", icon: <FolderOpen size={18} />, name: "Dossiê", desc: "Gestão de dados" },
-  { to: "/laudo", icon: <FileText size={18} />, name: "Laudos", desc: "Elaboração de laudos" },
-  { to: "/croqui", icon: <MapIcon size={18} />, name: "Croquis", desc: "Diagramas e plantas" },
-  { to: "/video", icon: <Video size={18} />, name: "Vídeos", desc: "Análises e mídias" },
-  { to: "/imagem", icon: <FileImage size={18} />, name: "Imagens", desc: "Fotos e evidências" },
-  {
-    to: "/documentoscopia",
-    icon: <ScanSearch size={18} />,
-    name: "Documentoscopia",
-    desc: "Análises técnicas",
-  },
-];
-
 export function HomeView() {
   const navigate = useNavigate();
   const occurrence = useWorkspaceStore(selectActiveOccurrence);
   const workspacePath = useWorkspaceStore(selectActiveWorkspacePath);
   const recents = useWorkspaceStore(selectRecents);
   const openOccurrence = useWorkspaceStore((s) => s.openOccurrence);
+  const setActiveStatus = useWorkspaceStore((s) => s.setActiveStatus);
+  const closeActiveOccurrence = useWorkspaceStore((s) => s.closeOccurrence);
+  const mutating = useWorkspaceStore((s) => s.isMutating);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [propsOpen, setPropsOpen] = useState(false);
+  const [concludeOpen, setConcludeOpen] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<SystemHealthSnapshot | null>(null);
@@ -195,6 +175,40 @@ export function HomeView() {
     }
   };
 
+  // --- Ciclo de vida da ocorrência (concluir / reabrir / fechar) ------------
+  // Concluir/reabrir mudam só o status (comando dedicado, sem zerar o cabeçalho).
+  // Fechar apenas desativa o caso ativo (não apaga nada) → volta ao estado vazio,
+  // de onde dá pra criar/abrir outra.
+  const handleConclude = async () => {
+    setFeedback(null);
+    setOpenError(null);
+    try {
+      await setActiveStatus("concluida");
+      setFeedback("Ocorrência concluída. Você pode reabri-la quando precisar.");
+    } catch (e) {
+      setOpenError(toSicroError(e).message);
+    } finally {
+      setConcludeOpen(false);
+    }
+  };
+
+  const handleReopen = async () => {
+    setFeedback(null);
+    setOpenError(null);
+    try {
+      await setActiveStatus("aberta");
+      setFeedback("Ocorrência reaberta.");
+    } catch (e) {
+      setOpenError(toSicroError(e).message);
+    }
+  };
+
+  const handleCloseOccurrence = () => {
+    setFeedback(null);
+    setOpenError(null);
+    closeActiveOccurrence();
+  };
+
   const hasWs = !!workspacePath && !!occurrence;
   const lastOpened = useMemo(() => {
     if (!occurrence) return null;
@@ -250,12 +264,7 @@ export function HomeView() {
               occurrence={occurrence}
               workspacePath={workspacePath}
               lastOpened={lastOpened}
-              healthBusy={busy === "health"}
               onContinue={() => navigate("/dossie")}
-              onBrowse={() => void handleBrowse()}
-              onProperties={() => setPropsOpen(true)}
-              onReveal={() => void handleReveal()}
-              onHealth={() => void handleHealth()}
             />
           ) : (
             <EmptyWorkspaceCard
@@ -266,38 +275,22 @@ export function HomeView() {
 
           <QuickActions
             hasWs={hasWs}
+            status={occurrence?.status ?? null}
             backupBusy={busy === "backup"}
+            healthBusy={busy === "health"}
             onNew={() => setDialogOpen(true)}
             onBrowse={() => void handleBrowse()}
             onImport={() => setImportOpen(true)}
             onVerify={() => navigate("/dossie?modo=integridade")}
             onBackup={() => void handleBackup()}
+            onProperties={() => setPropsOpen(true)}
+            onReveal={() => void handleReveal()}
+            onHealth={() => void handleHealth()}
+            onConclude={() => setConcludeOpen(true)}
+            onReopen={() => void handleReopen()}
+            onCloseOccurrence={handleCloseOccurrence}
           />
         </div>
-
-        {/* 3. Módulos da ocorrência ativa */}
-        {hasWs && (
-          <section className={styles.modulesSection} aria-label="Módulos da ocorrência ativa">
-            <div className={styles.sectionLabel}>Módulos da ocorrência ativa</div>
-            <div className={styles.modulesGrid}>
-              {MODULES.map((m) => (
-                <button
-                  key={m.to}
-                  type="button"
-                  className={styles.moduleCard}
-                  onClick={() => navigate(m.to)}
-                >
-                  <span className={styles.moduleIcon}>{m.icon}</span>
-                  <span className={styles.moduleText}>
-                    <span className={styles.moduleName}>{m.name}</span>
-                    <span className={styles.moduleDesc}>{m.desc}</span>
-                  </span>
-                  <ArrowRight size={16} className={styles.moduleArrow} aria-hidden />
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
 
         {/* 4. Histórico completo de ocorrências — busca por texto + data */}
         <HistoryCard
@@ -326,6 +319,23 @@ export function HomeView() {
           onClose={() => setPropsOpen(false)}
         />
       )}
+
+      <ConfirmDialog
+        open={concludeOpen}
+        busy={mutating}
+        title="Concluir ocorrência?"
+        confirmLabel="Concluir"
+        message={
+          <>
+            A ocorrência <strong>{occurrence ? occLabel(occurrence) : ""}</strong>{" "}
+            será marcada como <strong>Concluída</strong> e a data de encerramento
+            registrada.
+          </>
+        }
+        detail="Você pode reabri-la depois — nada é apagado."
+        onCancel={() => setConcludeOpen(false)}
+        onConfirm={() => void handleConclude()}
+      />
     </div>
   );
 }
@@ -393,22 +403,12 @@ function WorkspaceCard({
   occurrence,
   workspacePath,
   lastOpened,
-  healthBusy,
   onContinue,
-  onBrowse,
-  onProperties,
-  onReveal,
-  onHealth,
 }: {
   occurrence: Occurrence;
   workspacePath: string;
   lastOpened: string | null;
-  healthBusy: boolean;
   onContinue: () => void;
-  onBrowse: () => void;
-  onProperties: () => void;
-  onReveal: () => void;
-  onHealth: () => void;
 }) {
   return (
     <section className={styles.wsCard} aria-label="Workspace ativo">
@@ -456,22 +456,6 @@ function WorkspaceCard({
         <Button variant="primary" leftIcon={<ArrowRight size={16} />} onClick={onContinue}>
           Continuar ocorrência
         </Button>
-        <Button variant="secondary" leftIcon={<FolderOpen size={15} />} onClick={onBrowse}>
-          Abrir workspace
-        </Button>
-        <Button variant="secondary" leftIcon={<Info size={15} />} onClick={onProperties}>
-          Propriedades
-        </Button>
-        <PopMenu
-          items={[
-            { label: "Abrir pasta no Explorer", icon: <FolderOpen size={14} />, onClick: onReveal },
-            {
-              label: healthBusy ? "Gerando relatório…" : "Relatório de saúde",
-              icon: <FileText size={14} />,
-              onClick: onHealth,
-            },
-          ]}
-        />
       </div>
     </section>
   );
@@ -504,33 +488,78 @@ function EmptyWorkspaceCard({ onNew, onBrowse }: { onNew: () => void; onBrowse: 
 // Ações rápidas (área de comando)
 // ---------------------------------------------------------------------------
 
+type QAItem = {
+  id: string;
+  icon: ReactNode;
+  title: string;
+  desc: string;
+  onClick: () => void;
+  disabled?: boolean;
+};
+
+/**
+ * Painel único de ações. Agrega o que antes era "Ações rápidas" + o menu "⋯"
+ * (escondido) do card do workspace. Quando há caso ativo, expõe TODAS as ações
+ * do workspace (concluir/reabrir, propriedades, integridade, backup, relatório,
+ * abrir pasta, fechar). Sem caso ativo, só as ações globais (nova/abrir/importar).
+ */
 function QuickActions({
   hasWs,
+  status,
   backupBusy,
+  healthBusy,
   onNew,
   onBrowse,
   onImport,
   onVerify,
   onBackup,
+  onProperties,
+  onReveal,
+  onHealth,
+  onConclude,
+  onReopen,
+  onCloseOccurrence,
 }: {
   hasWs: boolean;
+  status: OccurrenceStatus | null;
   backupBusy: boolean;
+  healthBusy: boolean;
   onNew: () => void;
   onBrowse: () => void;
   onImport: () => void;
   onVerify: () => void;
   onBackup: () => void;
+  onProperties: () => void;
+  onReveal: () => void;
+  onHealth: () => void;
+  onConclude: () => void;
+  onReopen: () => void;
+  onCloseOccurrence: () => void;
 }) {
-  const items = [
-    { id: "new", icon: <Plus size={18} />, title: "Nova ocorrência", desc: "Criar do zero", onClick: onNew, disabled: false },
-    { id: "open", icon: <FolderOpen size={18} />, title: "Abrir workspace", desc: "Abrir existente", onClick: onBrowse, disabled: false },
-    { id: "import", icon: <Download size={18} />, title: "Importar .sicroapp", desc: "De outro computador", onClick: onImport, disabled: false },
-    { id: "verify", icon: <ShieldCheck size={18} />, title: "Verificar integridade", desc: "Checar arquivos", onClick: onVerify, disabled: !hasWs },
-    { id: "backup", icon: <FolderArchive size={18} />, title: backupBusy ? "Compactando…" : "Gerar backup", desc: "Do workspace ativo", onClick: onBackup, disabled: !hasWs || backupBusy },
+  const globalItems: QAItem[] = [
+    { id: "new", icon: <Plus size={18} />, title: "Nova ocorrência", desc: "Criar do zero", onClick: onNew },
+    { id: "open", icon: <FolderOpen size={18} />, title: "Abrir workspace", desc: "Abrir existente", onClick: onBrowse },
+    { id: "import", icon: <Download size={18} />, title: "Importar .sicroapp", desc: "De outro computador", onClick: onImport },
   ];
+  const wsItems: QAItem[] = hasWs
+    ? [
+        status === "concluida"
+          ? { id: "reopen", icon: <RotateCcw size={18} />, title: "Reabrir ocorrência", desc: "Voltar para Aberta", onClick: onReopen }
+          : { id: "conclude", icon: <CheckCircle2 size={18} />, title: "Concluir ocorrência", desc: "Marcar como Concluída", onClick: onConclude },
+        { id: "props", icon: <Info size={18} />, title: "Propriedades", desc: "Dados da ocorrência", onClick: onProperties },
+        { id: "verify", icon: <ShieldCheck size={18} />, title: "Verificar integridade", desc: "Checar arquivos", onClick: onVerify },
+        { id: "backup", icon: <FolderArchive size={18} />, title: backupBusy ? "Compactando…" : "Gerar backup", desc: "Do workspace ativo", onClick: onBackup, disabled: backupBusy },
+        { id: "health", icon: <FileText size={18} />, title: healthBusy ? "Gerando…" : "Relatório de saúde", desc: "Diagnóstico do caso", onClick: onHealth, disabled: healthBusy },
+        { id: "reveal", icon: <FolderOpen size={18} />, title: "Abrir pasta", desc: "No Explorer", onClick: onReveal },
+        { id: "close", icon: <LogOut size={18} />, title: "Fechar ocorrência", desc: "Sem excluir nada", onClick: onCloseOccurrence },
+      ]
+    : [];
+  const items = [...globalItems, ...wsItems];
   return (
-    <section className={styles.qaCard} aria-label="Ações rápidas">
-      <div className={styles.sectionLabel}>Ações rápidas</div>
+    <section className={styles.qaCard} aria-label="Ações do workspace">
+      <div className={styles.sectionLabel}>
+        {hasWs ? "Ações do workspace" : "Ações"}
+      </div>
       <div className={styles.qaGrid}>
         {items.map((it) => (
           <button
@@ -1001,6 +1030,10 @@ function PropertiesModal({
     ["Logradouro", occurrence.logradouro],
     ["Referência", occurrence.referencia],
     ["Data do fato", occurrence.data_fato ? formatDateTime(occurrence.data_fato) : null],
+    [
+      "Encerrada em",
+      occurrence.data_encerramento ? formatDateTime(occurrence.data_encerramento) : null,
+    ],
     ["Peritos", occurrence.peritos.length ? occurrence.peritos.join(", ") : null],
     ["Criada em", formatDateTime(occurrence.created_at)],
     ["Atualizada em", formatDateTime(occurrence.updated_at)],

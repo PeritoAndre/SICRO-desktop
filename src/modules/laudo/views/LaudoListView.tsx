@@ -126,9 +126,7 @@ export function LaudoListView({
     void loadList(workspacePath);
   }, [workspacePath, loadList]);
 
-  const suggestedTitle = buildSuggestedTitle(
-    activeOccurrence?.tipo_pericia ?? null,
-  );
+  const suggestedTitle = buildSuggestedTitle(activeOccurrence);
   const occurrenceContext = activeOccurrence
     ? toOccurrenceContext(activeOccurrence)
     : null;
@@ -330,10 +328,26 @@ function toOccurrenceContext(o: Occurrence): OccurrenceContext {
   };
 }
 
-function buildSuggestedTitle(tipo: string | null): string {
-  const date = new Date().toLocaleDateString("pt-BR");
-  if (tipo && tipo.trim()) return `Laudo Pericial — ${tipo} (${date})`;
-  return `Laudo Pericial (${date})`;
+/**
+ * Sugestão do nome do laudo no formato pedido pelo perito:
+ *   {TIPO} - Laudo Nº {protocolo} - BO {numero_bo} - Ofício nº {oficio}
+ * Omite os segmentos cujo dado não existe na ocorrência (ex.: sem ofício → some
+ * o "Ofício nº"). Sem nenhum dado, cai no rótulo genérico com a data.
+ */
+function buildSuggestedTitle(occ: Occurrence | null): string {
+  const clean = (v: string | null | undefined) => (v ?? "").trim() || null;
+  const tipo = clean(occ?.tipo_pericia);
+  const protocolo = clean(occ?.protocolo);
+  const bo = clean(occ?.numero_bo);
+  const oficio = clean(occ?.oficio);
+  const parts = [
+    tipo,
+    protocolo ? `Laudo Nº ${protocolo}` : null,
+    bo ? `BO ${bo}` : null,
+    oficio ? `Ofício nº ${oficio}` : null,
+  ].filter((p): p is string => !!p);
+  if (parts.length) return parts.join(" - ");
+  return `Laudo Pericial (${new Date().toLocaleDateString("pt-BR")})`;
 }
 
 /** Coerce a LaudoStatus into the StatusPill's OccurrenceStatus look-alike.

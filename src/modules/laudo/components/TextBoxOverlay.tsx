@@ -54,38 +54,10 @@ export interface TextBoxOverlayProps {
 
 type ResizeDir = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
 
-/** Ordem CW começando do norte. Usado pra mapear AABB dir → LOCAL dir
- *  quando a caixa está rotacionada. */
-const DIR_ORDER_CW: ResizeDir[] = [
-  "n",
-  "ne",
-  "e",
-  "se",
-  "s",
-  "sw",
-  "w",
-  "nw",
-];
-
-/** Mapeia o dir do AABB (o que o usuário VÊ quando clica num handle
- *  posicionado no AABB do textbox rotacionado) pra o dir LOCAL (do
- *  textbox não-rotacionado). Quando r = 0°, é identidade. Pra cada
- *  90° de rotação CCW, os dirs locais "giram" 2 posições CW na lista.
- *
- *  Pra rotações intermediárias (não múltiplas de 90°), aproxima pra o
- *  quadrante 90° mais próximo via Math.floor — boundary em 90°, 180°,
- *  270° (onde a AABB do box rotacionado realmente "vira" de um corner
- *  pra outro). */
-function aabbDirToLocalDir(
-  aabbDir: ResizeDir,
-  rotationDeg: number,
-): ResizeDir {
-  const normalized = ((rotationDeg % 360) + 360) % 360;
-  const q = Math.floor(normalized / 90) % 4;
-  const idx = DIR_ORDER_CW.indexOf(aabbDir);
-  const localIdx = (((idx - 2 * q) % 8) + 8) % 8;
-  return DIR_ORDER_CW[localIdx]!;
-}
+// NOTA: o antigo `aabbDirToLocalDir`/`DIR_ORDER_CW` (mapeamento AABB→local)
+// foi removido. Agora o overlay de seleção é renderizado JÁ ROTACIONADO junto
+// com a caixa (transform: rotate no .overlay), então os handles ficam nos
+// cantos LOCAIS — o `dir` do handle já é o dir local, sem mapeamento.
 
 /** Pra cada `localDir`, retorna os fatores (lxFactor, lyFactor) do
  *  corner LOCAL OPOSTO — o que deve permanecer fixo na tela durante o
@@ -175,10 +147,19 @@ export function TextBoxOverlay({
       if (!overlay || !containerEl) return;
       const r = nodeEl.getBoundingClientRect();
       const c = containerEl.getBoundingClientRect();
-      overlay.style.left = `${r.left - c.left}px`;
-      overlay.style.top = `${r.top - c.top}px`;
-      overlay.style.width = `${r.width}px`;
-      overlay.style.height = `${r.height}px`;
+      // Caixa NÃO-rotacionada centrada no centro do AABB — a rotação vem do
+      // `transform` aplicado no render. Sem isto o overlay seguiria o AABB (a
+      // caixa maior alinhada à tela) e os handles não girariam junto.
+      const zoom =
+        containerEl.offsetWidth > 0 ? c.width / containerEl.offsetWidth : 1;
+      const w = (nodeEl.offsetWidth || 1) * zoom;
+      const h = (nodeEl.offsetHeight || 1) * zoom;
+      const cx = r.left - c.left + r.width / 2;
+      const cy = r.top - c.top + r.height / 2;
+      overlay.style.left = `${cx - w / 2}px`;
+      overlay.style.top = `${cy - h / 2}px`;
+      overlay.style.width = `${w}px`;
+      overlay.style.height = `${h}px`;
     },
     [containerRef],
   );
@@ -211,9 +192,15 @@ export function TextBoxOverlay({
     }
     const r = domEl.getBoundingClientRect();
     const c = containerRef.current.getBoundingClientRect();
-    setRect(
-      new DOMRect(r.left - c.left, r.top - c.top, r.width, r.height),
-    );
+    // Caixa NÃO-rotacionada centrada no centro do AABB (o render aplica
+    // `transform: rotate`, então os handles giram junto com a caixa).
+    const contEl = containerRef.current;
+    const zoom = contEl.offsetWidth > 0 ? c.width / contEl.offsetWidth : 1;
+    const w = (domEl.offsetWidth || 1) * zoom;
+    const h = (domEl.offsetHeight || 1) * zoom;
+    const cx = r.left - c.left + r.width / 2;
+    const cy = r.top - c.top + r.height / 2;
+    setRect(new DOMRect(cx - w / 2, cy - h / 2, w, h));
   }, [selected, containerRef, editor]);
 
   useLayoutEffect(() => {
@@ -471,8 +458,9 @@ export function TextBoxOverlay({
       const el = selected.domEl;
       const zoom = getZoom();
 
-      // Mapeia o handle visual (AABB) pro corner LOCAL real.
-      const localDir = aabbDirToLocalDir(dir, rotationDeg);
+      // Handles giram JUNTO com a caixa (overlay rotacionado), então o dir do
+      // handle JÁ É o dir local — sem mapeamento AABB→local.
+      const localDir = dir;
 
       // Pré-calcula o screen position do corner FIXO (oposto ao
       // localDir). Manteremos esse ponto constante durante o resize.
@@ -699,6 +687,11 @@ export function TextBoxOverlay({
           top: `${rect.top}px`,
           width: `${rect.width}px`,
           height: `${rect.height}px`,
+          // A caixa de seleção + handles giram JUNTO com a textbox (em vez de
+          // formar a AABB maior alinhada à tela). `rect` já é a caixa
+          // não-rotacionada centrada; aqui só aplicamos a rotação.
+          transform: `rotate(${rotation}deg)`,
+          transformOrigin: "center",
         }}
         onMouseDown={(e) => e.stopPropagation()}
       >
@@ -708,7 +701,9 @@ export function TextBoxOverlay({
           style={{
             top: -42,
             left: rect.width / 2,
-            transform: "translateX(-50%)",
+            // Contra-rotaciona pra manter a toolbar legível mesmo com a caixa
+            // girada (o .overlay tem `rotate`; aqui desfazemos no texto).
+            transform: `translateX(-50%) rotate(${-rotation}deg)`,
           }}
           onMouseDown={(e) => e.stopPropagation()}
         >

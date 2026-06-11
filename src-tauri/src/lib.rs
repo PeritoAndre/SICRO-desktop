@@ -64,6 +64,7 @@ pub fn run() {
             commands::workspace_commands::open_occurrence,
             commands::workspace_commands::get_occurrence,
             commands::workspace_commands::update_occurrence,
+            commands::workspace_commands::set_occurrence_status,
             commands::workspace_commands::list_recent_occurrences,
             commands::workspace_commands::forget_recent_occurrence,
             commands::workspace_commands::delete_occurrence,

@@ -25,6 +25,9 @@ interface VerticalRulerProps {
   pageGapCm: number;
   topMarginCm: number;
   bottomMarginCm: number;
+  /** Piso da margem superior (cm). A margem do texto não pode subir acima dele —
+   *  é a base do cabeçalho, senão o texto começaria em cima do timbre. Default 0. */
+  minTopMarginCm?: number;
   onTopMarginChange?: (cm: number) => void;
   onBottomMarginChange?: (cm: number) => void;
 }
@@ -35,6 +38,7 @@ export function VerticalRuler({
   pageGapCm,
   topMarginCm,
   bottomMarginCm,
+  minTopMarginCm = 0,
   onTopMarginChange,
   onBottomMarginChange,
 }: VerticalRulerProps) {
@@ -112,7 +116,10 @@ export function VerticalRuler({
       const newHandleCmInStack = cursorCm(clientY) - offsetCm;
       if (side === "top") {
         const cm = newHandleCmInStack - pageTopInStackCm;
-        return clamp(cm, 0, 8);
+        // Piso = base do cabeçalho (minTopMarginCm). O teto sobe junto se o
+        // cabeçalho passar de 8cm (até 10cm), senão o handle ficaria preso
+        // abaixo do próprio piso.
+        return clamp(cm, minTopMarginCm, Math.max(8, minTopMarginCm));
       } else {
         const cm = pageTopInStackCm + pageHeightCm - newHandleCmInStack;
         return clamp(cm, 0, 8);

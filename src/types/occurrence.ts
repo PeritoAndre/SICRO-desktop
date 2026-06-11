@@ -53,6 +53,8 @@ export interface Occurrence {
 export interface NewOccurrenceInput {
   numero_bo?: string | null;
   protocolo?: string | null;
+  /** Nº do ofício da Polícia Civil — distinto do protocolo (nº do laudo, PC). */
+  oficio?: string | null;
   tipo_pericia?: string | null;
   municipio?: string | null;
   peritos?: string[];
