@@ -600,22 +600,44 @@ export function LaudoEditorView({ workspacePath, onBack }: LaudoEditorViewProps)
     }
   }, [editor, initialContent, currentLaudo?.updated_at]);
 
-  // Pós-laudo S — Sync editor content quando o doc do store muda mas
-  // o useEditor não recriou. Acontece tipicamente quando navegamos
-  // de /imagem ← /laudo: o LaudoEditorView remonta, o useEditor cria
-  // editor com initialContent=null (porque o store carrega async), e
-  // depois o currentDoc aparece — mas useEditor não reativa. Resultado:
-  // editor vazio, figures não encontradas, round-trip do crop falha.
+  // Pós-laudo S — Hidratação do corpo na CORRIDA DE MONTAGEM.
   //
-  // Fix: sempre que tivermos editor + currentDoc com conteúdo, mas o
-  // editor estiver vazio (tamanho de doc < 4 = só <p></p>), forçamos
-  // o setContent. Não tira o foco do usuário porque só roda no estado
-  // "deserializado mas vazio".
+  // Quando navegamos /imagem→/laudo o LaudoEditorView remonta e o useEditor
+  // pode criar o editor com initialContent=null (o store carrega o doc async).
+  // Quando o currentDoc chega, o editor já existe mas está vazio — então
+  // injetamos o conteúdo do doc UMA única vez (senão o round-trip do crop
+  // não acha as figures, etc.).
+  //
+  // BUG corrigido: a versão antiga re-injetava o currentDoc sempre que o
+  // corpo ficava vazio. Como "vazio" também inclui o usuário ter APAGADO
+  // tudo, ao re-renderizar (ex.: clicar no cabeçalho) o texto apagado
+  // "ressuscitava" a partir do currentDoc — que fica atrás do editor ao vivo
+  // (liveContent). A guarda `bodyHydrationDoneRef` limita a hidratação
+  // automática à janela de montagem (uma vez por laudo); depois disso, um
+  // corpo vazio é intenção do usuário e nunca é sobrescrito.
+  const bodyHydrationDoneRef = useRef(false);
+
+  // Rearma a hidratação ao trocar de laudo (o useEditor recria o editor).
   useEffect(() => {
-    if (!editor || !currentDoc?.content) return;
-    const isEmpty = editor.state.doc.content.size <= 4;
-    if (!isEmpty) return;
-    editor.commands.setContent(currentDoc.content);
+    bodyHydrationDoneRef.current = false;
+  }, [currentLaudo?.id]);
+
+  useEffect(() => {
+    if (bodyHydrationDoneRef.current) return;
+    // Espera editor E doc prontos. Enquanto o doc não chega (null) seguimos
+    // armados — é exatamente a corrida de montagem que queremos cobrir.
+    if (!editor || !currentDoc) return;
+    const editorEmpty = editor.state.doc.content.size <= 4;
+    if (editorEmpty && currentDoc.content) {
+      // Editor montou vazio antes do doc chegar → injeta o conteúdo do doc.
+      // emitUpdate:false: carregar conteúdo não deve marcar "dirty" nem
+      // disparar onUpdate; sincronizamos o liveContent manualmente.
+      editor.commands.setContent(currentDoc.content, { emitUpdate: false });
+      setLiveContent(editor.getJSON());
+    }
+    // Editor + doc prontos = corrida resolvida. Nunca mais auto-hidratar
+    // este laudo (senão apagar tudo + re-render ressuscita o texto).
+    bodyHydrationDoneRef.current = true;
   }, [editor, currentDoc]);
 
   // Build the SicroDoc snapshot the inspector + preview will look at.
