@@ -1,121 +1,130 @@
-# SICRO Desktop 2.0
+<div align="center">
 
-Sistema Integrado de Criminalística e Operações — suíte pericial desktop
-para o perito criminal. Geração de laudo, croqui de sinistro, análise
-pericial de imagem, dossiê operacional e Central de Evidências em um
-único workspace `.sicro` autocontido.
+<img src="public/branding/sicro-logo.png" alt="SICRO 2.0" width="116" />
 
-Versão atual: **`2.0.0-beta.0`** · Stack: **Tauri 2 + React 18 + TypeScript + Rust + SQLite**.
+# SICRO 2.0
 
----
+**Suíte pericial forense — offline, local e reproduzível.**
 
-## Pré-requisitos
+Laudos institucionais, croquis, análise de imagem e vídeo, documentoscopia e
+central de evidências, num único workspace `.sicro` autocontido.
 
-Instale uma vez, na máquina:
+![status](https://img.shields.io/badge/status-beta-orange)
+![plataforma](https://img.shields.io/badge/plataforma-Windows%2010%2F11-1f6feb)
+![offline](https://img.shields.io/badge/100%25-offline-2ea043)
+![license](https://img.shields.io/badge/license-Apache--2.0-blue)
 
-| Ferramenta | Versão mínima | Como instalar |
-|---|---|---|
-| Node.js | 20.x (recomendado 22+) | https://nodejs.org/ |
-| pnpm | 9.x | `npm install -g pnpm` |
-| Rust toolchain | stable 1.77+ | https://rustup.rs/ |
-| Microsoft WebView2 | já vem no Windows 11 | https://developer.microsoft.com/en-us/microsoft-edge/webview2/ |
-| Visual Studio Build Tools (Windows) | "Desktop development with C++" | https://visualstudio.microsoft.com/visual-cpp-build-tools/ |
+### ⬇️ [Baixar o instalador (beta)](https://github.com/PeritoAndre/SICRO-desktop/releases/latest)
 
-Pré-requisitos completos do Tauri (Windows/Mac/Linux) em
-https://tauri.app/start/prerequisites/.
+<sub>Polícia Científica do Amapá</sub>
+
+</div>
 
 ---
 
-## Instalação
+## O que é
 
-```powershell
-cd "C:\SICRO 2.0\sicro-desktop"
-pnpm install
-```
+O **SICRO 2.0** é uma ferramenta de **apoio** ao trabalho do perito criminal.
+Reúne, num só programa que roda **100% offline**, tudo o que normalmente fica
+espalhado por vários softwares: o laudo, os croquis, o tratamento de imagem e
+vídeo, a leitura de documentos e o controle de integridade das evidências —
+cada caso isolado num arquivo de workspace `.sicro`.
 
-A primeira compilação do backend Rust pode demorar alguns minutos — vai
-baixar e compilar dependências como `tauri`, `rusqlite`, `image`, `docx-rs`.
+É **determinístico e honesto sobre seus limites**: realça, mede e organiza, mas
+**nunca fabrica prova, nunca altera o original e não tira conclusões** — o
+perito tem sempre a palavra final.
 
-## Rodar em modo desenvolvimento
+---
 
-```powershell
-pnpm tauri:dev
-```
+## Instalação (perito / usuário final)
 
-Abre uma janela nativa do SICRO Desktop com hot reload no front-end.
+1. Baixe o instalador mais recente em **[Releases](https://github.com/PeritoAndre/SICRO-desktop/releases/latest)** — arquivo `SICRO 2.0_<versão>_x64-setup.exe`.
+2. Execute. O instalador pergunta se quer instalar **só para você** (sem
+   administrador) ou **para todos os usuários** (requer administrador).
+3. Leia e aceite o **Termo de Uso** e conclua. Pronto — atalho **SICRO 2.0** no
+   menu Iniciar.
 
-## Build de produção
-
-```powershell
-pnpm tauri:build
-```
-
-Gera o instalador em `src-tauri/target/release/bundle/`.
-
-## Validações
-
-```powershell
-pnpm typecheck     # type-check TS sem rodar
-pnpm test          # vitest run (todos os testes do front)
-cargo check        # type-check do backend (de dentro de src-tauri/)
-cargo test         # testes do backend (de dentro de src-tauri/)
-```
+> **Requisitos:** Windows 10/11 (x64) e o runtime **WebView2** (já presente na
+> maioria das instalações; o instalador orienta caso falte).
+>
+> Versão **beta** — em validação. Veja [`KNOWN_LIMITATIONS.md`](./KNOWN_LIMITATIONS.md)
+> e relate problemas na aba **Issues**.
 
 ---
 
 ## Módulos
 
-| Módulo | Descrição |
+| Módulo | O que faz |
 |---|---|
-| **Home** | Central operacional: card do **workspace ativo**, ações rápidas (nova / abrir / importar / verificar integridade / backup), atalhos para os módulos da ocorrência, ocorrências recentes e avisos do sistema. |
-| **Dossiê** | Workspace pericial — metadata da ocorrência, fotos importadas, anotações. |
-| **Laudo** | Editor TipTap rico (A4, paginação real, header dinâmico, estilos, sumário, comentários, snapshots), templates institucionais, exportação PDF/DOCX/HTML, assinatura via SIGDOCS (institucional Amapá) ou gov.br. |
-| **Croqui** | Editor Konva 2D com Road Engine compatível com o estilo visual do SICRO 1.0, importação OSM (Overpass + Leaflet), importação de fotos de drone com correção de lente, exportação PNG técnica/limpa. |
-| **Evidências** | Central de integridade — registry, verificador de hashes, detector de links quebrados, relatório técnico. |
-| **Imagem** | Editor pericial repaginado por intenção — **trilha de ferramentas com flyout**, painel em modos **Realçar / Filtros / Analisar / Anotar**, **galeria de ~32 filtros forenses** buscável e explicada (Sobel, CLAHE, ELA, DStretch, DoG…), ajustes não-destrutivos (brilho/contraste/gama/saturação/**matiz**/**canais R-G-B**), **zoom nível pixel (até 64×)**, **paleta de comandos ⌘K**, réguas que seguem o mouse, EXIF, histograma, múltiplos hashes (MD5/SHA-1/SHA-256/SHA-3), correção de perspectiva 4-point, anotações/medições e cadeia de custódia. Tudo §13: realça/mede, nunca fabrica; o original nunca é alterado. |
-| **Áudio** | Aquisição com custódia (importar / extrair de vídeo, original + WAV de análise hasheados) e detalhe organizado em abas: **Realçar** (filtros de escuta não-destrutivos), **Analisar** (espectrograma + medições objetivas: pico/RMS/clipping, espectro FFT, ENF para indício de splice), **Trechos** (recorte A-B + compilação rotulada) e **Ficha** (metadados, hashes, custódia). Degravação manual + rascunho por IA local (whisper.cpp). |
-| **Configurações** | Preferências globais do app (fora do `.sicro`): perfil do perito, instituição/marca, aparência (tema/cor), integrações (SIGDOC), caminhos padrão, IA & OCR, atalhos e **Backup geral** — cópia incremental de todos os casos do acervo. |
+| **Home** | Central operacional: workspace ativo, ações rápidas (nova / abrir / importar / verificar integridade / backup), atalhos da ocorrência e casos recentes. |
+| **Dossiê** | Workspace da ocorrência — metadados, fotos importadas e anotações. |
+| **Laudo** | Editor A4 com paginação real, estilos, sumário, comentários e versões; templates institucionais; exportação **PDF / DOCX / HTML**; assinatura **gov.br** e **SIGDOCS**. |
+| **Croqui** | Editor 2D de croquis **viário** (com importação do OpenStreetMap), **corporal** (lesões) e **planta baixa**; exportação PNG técnica para o laudo. |
+| **Imagem** | Realce e análise **não-destrutiva**: galeria de filtros forenses (Sobel, CLAHE, ELA…), ajustes, zoom a nível de pixel, EXIF, histograma, múltiplos hashes (MD5/SHA-1/SHA-256/SHA-3), correção de perspectiva, anotações, medições e cadeia de custódia. |
+| **Áudio** | Aquisição com custódia, realce de escuta, espectrograma e medições objetivas, recorte de trechos e degravação (manual + rascunho por IA local). |
+| **Documentoscopia** | Leitura de documentos e PDFs por **OCR offline** + análise de erro de compressão (ELA), com a origem de cada resultado registrada. |
+| **Evidências** | Central de integridade: registro de evidências, verificação de hashes, detecção de links quebrados e relatório técnico. |
+| **Configurações** | Perfil do perito, instituição/marca, tema, integrações, OCR/IA e **backup geral** do acervo. |
 
-Módulos roteados mas ainda enxutos neste beta: Vídeo, Mídias, Estatísticas
-(planejados para releases posteriores).
+Em evolução neste beta: **Vídeo**, **Mídias** e **Estatísticas**.
 
 ---
 
-## Backup e recuperação (DR)
+## Princípio de apoio
 
-O SICRO trabalha **offline e local**. A regra de ouro: **dados vivos ficam
-locais; a nuvem recebe BACKUPS**. Um `.sicro`/SQLite "vivo" dentro de uma pasta
-sincronizada (OneDrive/Dropbox/Drive) pode corromper — o serviço de sync mexe
-nos arquivos no meio das escritas. Por isso a pasta padrão de casos é
-**`~\SICRO\Casos`** (local) e o app **avisa** se você apontar um caso para uma
-pasta sincronizada. A redundância em nuvem é feita por **backup estático**, que
-o sync transfere com segurança. O original nunca é alterado (§13).
+O SICRO existe para **dar suporte**, não para substituir o perito:
 
-- **Por caso** (`.sicrobackup`): no card do *workspace ativo* na Home, gera um
-  ZIP do `.sicro` inteiro com manifesto interno + SHA-256. Ignora `cache/` e
-  `logs/`.
-- **Geral** (Configurações → **Backup geral**): copia **todas as ocorrências**
-  do acervo para uma pasta de destino (HD externo, pendrive, **nuvem**, rede),
-  num **conjunto v2**:
+- **Offline e local** — nada sai da máquina; sem nuvem obrigatória, sem telemetria.
+- **Nunca altera o original** — trabalha sobre cópias; a evidência de entrada é preservada.
+- **Reproduzível e auditável** — registra a origem de cada resultado (qual ferramenta, quais parâmetros).
+- **Sem conclusões automáticas** — realça e mede; a interpretação e a assinatura são do perito.
 
-  ```
-  <destino>/
-    sicro-backup-index.json
-    config/app-settings.json     ← perfil, instituição, cabeçalhos
-    casos/<caso>.sicrobackup     ← 1 por caso (completo: fotos/vídeos/drone)
-  ```
+---
 
-  É **incremental** — só recopia os casos que mudaram desde o último backup
-  (compara um *fingerprint* de caminho/tamanho/data). Casos não encontrados (HD
-  desconectado / movido) são reportados sem apagar o backup anterior.
-- **Auto-backup ao fechar a ocorrência**: opção no card do Backup geral
-  (ligada por padrão quando há um destino). Ao sair/trocar de ocorrência, dispara
-  o backup geral incremental para o destino — mantém a cópia fresca sozinho.
-- **Restaurar backup** (Configurações → **Backup geral → Restaurar backup**):
-  aponta a pasta de backup (de qualquer origem) e o app recria os casos na pasta
-  local + restaura o **perfil/cabeçalhos** (config) + reindexa os recentes.
-  Cenário "PC pifou/trocou → instala o SICRO → restaura → tudo de volta". Não
-  sobrescreve casos que já existam no destino.
+## Backup e recuperação
+
+Regra de ouro: **dados vivos ficam locais; a nuvem recebe backups estáticos.**
+Um `.sicro` "vivo" dentro de uma pasta sincronizada (OneDrive/Drive) pode
+corromper — por isso a pasta padrão de casos é local (`~\SICRO\Casos`) e o app
+avisa se você apontar um caso para pasta sincronizada.
+
+- **Por caso** — ZIP `.sicrobackup` do workspace inteiro, com manifesto + SHA-256.
+- **Geral (incremental)** — copia todos os casos do acervo + o perfil/cabeçalhos
+  para um destino (HD externo, pendrive, nuvem, rede); só recopia o que mudou.
+  Pode rodar sozinho ao fechar a ocorrência.
+- **Restaurar** — aponta a pasta de backup e o app recria os casos + a
+  configuração. Cenário "trocou de PC → instala o SICRO → restaura → tudo de volta".
+
+---
+
+## 🛠️ Build do código-fonte (desenvolvedores)
+
+Stack: **Tauri 2 + React 18 + TypeScript + Rust + SQLite**.
+
+| Ferramenta | Versão | Onde |
+|---|---|---|
+| Node.js | 20.x (rec. 22+) | https://nodejs.org/ |
+| pnpm | 9.x | `npm install -g pnpm` |
+| Rust (stable) | 1.77+ | https://rustup.rs/ |
+| WebView2 | (já vem no Windows 11) | https://developer.microsoft.com/microsoft-edge/webview2/ |
+| VS Build Tools | "Desktop development with C++" | https://visualstudio.microsoft.com/visual-cpp-build-tools/ |
+
+```powershell
+pnpm install          # dependências do front
+pnpm tauri dev        # app nativo com hot reload
+pnpm tauri build      # gera o instalador em src-tauri/target/release/bundle/
+```
+
+Validações:
+
+```powershell
+pnpm typecheck        # type-check do front
+pnpm test             # vitest (front)
+cargo check           # type-check do backend (em src-tauri/)
+cargo test            # testes do backend (em src-tauri/)
+```
+
+Pré-requisitos completos do Tauri: https://tauri.app/start/prerequisites/.
 
 ---
 
@@ -123,60 +132,41 @@ o sync transfere com segurança. O original nunca é alterado (§13).
 
 ```
 sicro-desktop/
-├── docs/
-│   ├── archive/                   # Relatórios históricos (Spike + MVP)
-│   ├── sicro-laudo-auditoria.md
-│   └── ...
-├── src/                           # Frontend React + TypeScript
-│   ├── app/                       # AppShell, ActivityRail, TopBar, StatusBar
-│   ├── core/                      # commands, errors, formatters
-│   ├── design-system/             # tokens.css, typography.css
-│   ├── components/                # Button, Card, Dialog, StatusPill, EmptyState
-│   ├── modules/                   # home / laudo / croqui / evidencias / imagem
-│   ├── stores/                    # Zustand stores
-│   └── types/                     # Tipos espelhando structs Rust
-├── src-tauri/                     # Backend nativo Rust
-│   ├── src/
-│   │   ├── commands/              # Comandos expostos ao front (invoke)
-│   │   ├── workspace/             # Workspace .sicro (criar, abrir, backup)
-│   │   ├── database/              # SQLite + migrations + repositórios
-│   │   ├── filesystem/            # Safe paths, atomic write
-│   │   ├── exporters/             # HTML / PDF (Edge headless) / DOCX
-│   │   ├── image_processing/      # Filtros, lens correction, EXIF, hashes
-│   │   ├── evidence/              # Registry + integrity verifier
-│   │   ├── models/                # Structs serializáveis
-│   │   └── state/                 # App state (recents, paths)
-│   ├── migrations/                # SQL migrations versionadas
-│   ├── Cargo.toml
+├── docs/MANUAL_SICRO.md       # Manual do usuário (exibido na tela Ajuda)
+├── public/branding/           # Marca (logo, brasões)
+├── src/                       # Frontend React + TypeScript
+│   ├── app/                   # AppShell, ActivityRail, TopBar, StatusBar
+│   ├── core/                  # commands, errors, formatters
+│   ├── design-system/         # tokens, tipografia
+│   ├── components/            # UI compartilhada
+│   ├── modules/               # home / laudo / croqui / imagem / audio / …
+│   ├── stores/                # estado (Zustand)
+│   └── types/                 # tipos espelhando structs Rust
+├── src-tauri/                 # Backend nativo (Rust)
+│   ├── src/commands/          # comandos expostos ao front
+│   ├── src/workspace/         # workspace .sicro (criar, abrir, backup)
+│   ├── src/database/          # SQLite + migrations + repositórios
+│   ├── src/exporters/         # HTML / PDF / DOCX
+│   ├── src/image_processing/  # filtros, EXIF, hashes
+│   ├── src/evidence/          # registro + verificador de integridade
+│   ├── installer/             # arte e Termo de Uso do instalador
 │   └── tauri.conf.json
-├── KNOWN_LIMITATIONS.md           # Limitações conhecidas do release
-├── package.json
-└── README.md
+├── KNOWN_LIMITATIONS.md
+└── package.json
 ```
 
 ---
 
 ## Convenções
 
-- **Domínio em português** (`ocorrencia`, `laudo`, `croqui`, `vestigio`) — termos periciais sem equivalente direto em inglês.
-- **Código de infraestrutura em inglês** (variáveis, funções utilitárias, comandos).
-- **Commits em inglês** seguindo Conventional Commits (`feat(laudo): ...`, `fix(croqui): ...`).
-- **Documentação técnica em português**.
+- **Domínio em português** (`ocorrencia`, `laudo`, `croqui`, `vestigio`) — termos periciais sem equivalente direto.
+- **Infraestrutura em inglês** (variáveis, utilitários, comandos) · **commits** em Conventional Commits.
 
-## Histórico de desenvolvimento
-
-Relatórios técnicos do período Spike/MVP (Alpha-prep) ficam preservados em
-`docs/archive/` como referência histórica. Ver `docs/archive/README.md`
-para o índice.
+---
 
 ## Licença
 
-Apache License 2.0 — ver [`LICENSE`](./LICENSE).
+**Apache License 2.0** — ver [`LICENSE`](./LICENSE). Copyright © 2026 André Ricardo Barroso.
 
-Copyright © 2026 André Ricardo Barroso
-
-Você é livre pra usar, copiar, modificar, redistribuir e até vender o
-SICRO Desktop, desde que mantenha o aviso de copyright e a licença
-junto. A licença inclui **concessão expressa de patentes** entre
-contribuidores e usuários, com cláusula de represália defensiva contra
-processos de patente.
+Livre para usar, copiar, modificar e redistribuir, mantendo o aviso de copyright
+e a licença. Inclui concessão expressa de patentes com cláusula de represália defensiva.
