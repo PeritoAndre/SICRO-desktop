@@ -133,9 +133,13 @@ function compute(doc: ProseMirrorNode): AutoNumberingState {
 
     if (node.type.name === "table") {
       // Tabelas de LAYOUT (bloco de registro/timbre, `borderStyle: "none"`)
+      // e tabelas com legenda REMOVIDA (captionVisible=false, estilo Word)
       // não são exibições numeradas — não entram na contagem nem no map de
       // cross-refs (espelha numberFigures + SicroTableView).
-      if ((node.attrs["borderStyle"] as string | undefined) === "none") {
+      if (
+        (node.attrs["borderStyle"] as string | undefined) === "none" ||
+        node.attrs["captionVisible"] === false
+      ) {
         return false;
       }
       counters.table += 1;
@@ -150,6 +154,18 @@ function compute(doc: ProseMirrorNode): AutoNumberingState {
       // renderer (numberFigures). NÃO emitimos mais o widget acima da tabela
       // pra não duplicar o número. O `idToOrdinal` continua exposto pra
       // cross-references (F12.2) e pra lista de tabelas.
+      //
+      // F4.1 — Decoração de NÓ (invisível) carregando o ordinal: quando
+      // remover/adicionar uma legenda renumera as IRMÃS, o nó delas não muda
+      // e o ProseMirror não chamaria update() nos NodeViews — o prefixo
+      // "Tabela N — " ficaria obsoleto na tela (o export já estaria certo).
+      // A mudança do attr da decoração marca o nó como dirty → update() →
+      // syncCaption() recalcula o prefixo.
+      decorations.push(
+        Decoration.node(pos, pos + node.nodeSize, {
+          "data-table-ordinal": String(ordinal),
+        }),
+      );
       return false; // não desce em tableRow/tableCell
     }
 

@@ -62,7 +62,7 @@
   /* ---- Fonts ---- */
   --font-ui: Inter, "Segoe UI", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "Geist Mono", Consolas, monospace;
-  --font-doc: "Times New Roman", Cambria, serif;
+  --font-doc: Arial, "Helvetica Neue", Helvetica, sans-serif;
 
   /* ---- Spacing (base 4px) ---- */
   --space-1: 4px;

@@ -61,10 +61,14 @@ function walk(node: JSONContent, basePos: number, out: TableEntry[]): number {
   let inner = basePos + 1;
 
   if (type === "table") {
-    // Tabelas de LAYOUT (bloco de registro/timbre, `borderStyle: "none"`)
-    // não entram na lista de tabelas numeradas (espelha numberFigures +
-    // AutoNumbering + SicroTableView).
-    if ((node.attrs?.borderStyle as string | undefined) !== "none") {
+    // Tabelas de LAYOUT (bloco de registro/timbre, `borderStyle: "none"`) e
+    // com legenda REMOVIDA (captionVisible=false) não entram na lista de
+    // tabelas numeradas (espelha numberFigures + AutoNumbering +
+    // SicroTableView).
+    if (
+      (node.attrs?.borderStyle as string | undefined) !== "none" &&
+      node.attrs?.captionVisible !== false
+    ) {
       out.push(summarizeTable(node, openPos));
     }
   }

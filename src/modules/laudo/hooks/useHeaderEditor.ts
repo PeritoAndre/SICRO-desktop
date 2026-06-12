@@ -61,6 +61,11 @@ export function useHeaderEditor(options: UseHeaderEditorOptions) {
     editorProps: {
       attributes: {
         class: "sicro-editor-content",
+        // Marca a REGIÃO no DOM do editor. O NodeView da tabela
+        // (SicroTableView) lê isto pra saber que está no cabeçalho — tabelas
+        // de cabeçalho/rodapé são institucionais/layout (ex.: bloco de
+        // registro) e NÃO recebem a legenda numerada "Tabela N — …".
+        "data-sicro-region": "header",
       },
     },
     onUpdate({ editor: ed }) {
@@ -81,6 +86,14 @@ export function useHeaderEditor(options: UseHeaderEditorOptions) {
   // disparar onUpdate.
   useEffect(() => {
     if (!editor) return;
+    // FOCADO = o usuário está digitando AQUI: o editor é a fonte da verdade
+    // e qualquer `initialContent` divergente é um ECO ATRASADO do próprio
+    // onContentChange (persist debounced → store → prop). Sem este guard,
+    // digitar rápido (mais teclas que o eco) fazia o setContent REPOR o
+    // conteúdo velho e jogar o cursor pro fim do doc — era o "cursor sai da
+    // tabela e escreve embaixo" no cabeçalho. Conteúdo externo legítimo
+    // (abrir outro laudo, restaurar versão) chega com o editor desfocado.
+    if (editor.isFocused) return;
     const currentJson = editor.getJSON();
     if (jsonContentEqual(currentJson, initialContent)) return;
     isExternalUpdateRef.current = true;

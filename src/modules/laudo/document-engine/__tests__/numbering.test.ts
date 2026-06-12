@@ -92,6 +92,33 @@ describe("numberFigures — tabelas", () => {
     expect(t.content![0]!.type).toBe("tableRow");
   });
 
+  // F4.1 — legenda removível (estilo Word): captionVisible=false não numera,
+  // não consome ordinal, e o caption é ZERADO no JSON exportado (defesa pro
+  // DOCX, que lê o attr direto).
+  it("tabela com legenda removida (captionVisible=false) não numera nem consome ordinal", () => {
+    const hidden: JSONContent = {
+      ...table("Texto órfão que não deve exportar"),
+      attrs: { caption: "Texto órfão que não deve exportar", captionVisible: false },
+    };
+    const out = numberFigures(doc(table("Antes"), hidden, table("Depois")));
+    const tables = out.content!.filter((n) => n.type === "table");
+    expect(captionOf(tables[0]!)).toBe("Tabela 1 — Antes");
+    // A escondida sai com caption vazia (nada vaza pro export)…
+    expect(captionOf(tables[1]!)).toBe("");
+    // …e a seguinte continua a sequência sem pular número.
+    expect(captionOf(tables[2]!)).toBe("Tabela 2 — Depois");
+  });
+
+  it("captionVisible=true (ou ausente) mantém o comportamento atual", () => {
+    const explicit: JSONContent = {
+      ...table("Visível"),
+      attrs: { caption: "Visível", captionVisible: true },
+    };
+    const out = numberFigures(doc(explicit));
+    const t = out.content!.find((n) => n.type === "table")!;
+    expect(captionOf(t)).toBe("Tabela 1 — Visível");
+  });
+
   it("ignora tabelas de layout (borderStyle 'none') na numeração", () => {
     const layout: JSONContent = {
       type: "table",

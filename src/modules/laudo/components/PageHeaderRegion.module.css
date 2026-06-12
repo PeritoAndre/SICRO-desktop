@@ -18,7 +18,7 @@
   border-bottom: 1px dashed #c2c8d2;
   background: transparent;
   /* Default font para o header — pode ser sobrescrito pelo conteúdo. */
-  font-family: "Times New Roman", Cambria, serif;
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
   font-size: 11pt;
   transition: color 0.2s ease;
 }

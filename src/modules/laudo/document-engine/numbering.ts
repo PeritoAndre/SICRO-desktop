@@ -46,9 +46,22 @@ function walk(node: JSONContent, counters: Counters): JSONContent {
   // EXCEÇÃO: tabelas SEM bordas (`borderStyle: "none"`) são tabelas de
   // LAYOUT (bloco de registro/timbre), não exibições numeradas — não
   // recebem número nem legenda automática.
+  //
+  // F4.1 — Legenda REMOVIDA (captionVisible=false, estilo Word): também não
+  // numera. Em AMBOS os casos o caption é zerado no JSON numerado — cinto
+  // extra pra qualquer consumidor deste JSON não vazar texto órfão. (O DOCX
+  // NÃO passa por aqui: ele anda o .sicrodoc cru no Rust; a defesa
+  // equivalente vive em exporters/docx.rs::render_table.) Espelha
+  // SicroTableView.isNumerable.
   if (node.type === "table") {
-    if ((node.attrs?.borderStyle as string | undefined) === "none") {
-      return node;
+    if (
+      (node.attrs?.borderStyle as string | undefined) === "none" ||
+      node.attrs?.captionVisible === false
+    ) {
+      return {
+        ...node,
+        attrs: { ...(node.attrs ?? {}), caption: "" },
+      };
     }
     counters.table += 1;
     const number = counters.table;

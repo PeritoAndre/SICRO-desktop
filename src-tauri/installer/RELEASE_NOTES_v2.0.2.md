@@ -11,10 +11,19 @@ Atualização de correções e qualidade de vida, concentrada no **editor de lau
 - **Barra flutuante** sobre a tabela + **menu do botão direito** (mesclar/dividir
   células, inserir/remover linha e coluna).
 - **Mover** a tabela reordenando no fluxo do texto.
-- **Legenda/título** editável (e removível, mesmo quando inserida automaticamente).
+- **Legenda editável e removível** (estilo Word): clique no texto pra editar;
+  remova pelo ✕, pelo Backspace na legenda vazia ou pelo botão direito —
+  e recrie depois por "Adicionar legenda". Sem legenda, a tabela não consome
+  número e nada vaza pro PDF/DOCX.
+- **Sem negrito forçado**: tabela nova nasce com células comuns (a linha de
+  cabeçalho é opcional, e o peso da fonte é sempre do perito).
+- **Palavra maior que a coluna quebra dentro da célula** (editor, cabeçalho e
+  exportação).
 - **Cor de fundo por célula** e fundo uniforme entre as células.
 
 **Editor de laudo — fonte e cor**
+- **Arial é a fonte padrão** do laudo (editor, cabeçalho, PDF e DOCX) — e a
+  barra mostra sempre a fonte real do ponto clicado, nunca "fonte padrão".
 - **Detecção automática**: ao clicar num trecho, a barra mostra a fonte e o
   tamanho daquele ponto.
 - Campo de **tamanho** aceita qualquer número digitado, com lista até 72.
@@ -25,6 +34,12 @@ Atualização de correções e qualidade de vida, concentrada no **editor de lau
   caixas de texto, formas e fotos), um passo por ação.
 
 **Editor de laudo — outros ajustes**
+- **Margem superior estável em documentos longos**: a paginação não "comia"
+  mais a margem página após página.
+- **Texto apagado não volta**: apagar conteúdo e clicar no cabeçalho não
+  ressuscita mais o que foi apagado.
+- **Digitação rápida em tabela no cabeçalho** não joga mais o cursor pra fora
+  da tabela.
 - Caixa de texto **gira corretamente** (as alças acompanham o texto).
 - **Formas geométricas** funcionam dentro do cabeçalho e são exportadas.
 - A **régua de margem** do texto não invade mais o cabeçalho, e **reduzir o

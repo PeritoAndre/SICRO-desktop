@@ -55,6 +55,9 @@ declare module "@tiptap/core" {
     sicroTable: {
       /** Atualiza a legenda da tabela que contém o cursor/seleção. */
       setTableCaption: (caption: string) => ReturnType;
+      /** Mostra/esconde a legenda da tabela (estilo Word: remover apaga o
+       *  texto; re-adicionar cria vazia). */
+      setTableCaptionVisible: (visible: boolean) => ReturnType;
       /** Aplica atributos de apresentação (align/bordas/padding) na tabela
        *  que contém o cursor. */
       setTablePresentation: (attrs: {
@@ -161,6 +164,19 @@ export const SicroTable = Table.extend({
         // NÃO renderiza via attr — vira um elemento <caption> no renderHTML.
         renderHTML: () => ({}),
       },
+      // F4.1 — Legenda removível (estilo Word). `false` = a linha "Tabela N —
+      // descrição" não existe (nem no editor, nem no clone/export) e a tabela
+      // NÃO consome número. Recriável via botão direito ("Adicionar legenda").
+      // Aditivo: docs antigos (sem o attr) abrem com legenda visível.
+      captionVisible: {
+        default: true,
+        parseHTML: (el: HTMLElement) =>
+          el.getAttribute("data-caption-visible") !== "false",
+        renderHTML: (attrs: { captionVisible?: boolean }) =>
+          attrs.captionVisible === false
+            ? { "data-caption-visible": "false" }
+            : {},
+      },
       // F4 — Apresentação. Todos aditivos com defaults seguros. Os valores
       // são emitidos JUNTOS em renderHTML (via tablePresentationDataAttrs),
       // então o renderHTML individual é no-op pra não duplicar.
@@ -245,7 +261,25 @@ export const SicroTable = Table.extend({
       tablePresentationDataAttrs(node.attrs),
       { style: `${tablePresentationStyle(node.attrs)} ${widthStyle}`.trim() },
     );
-    const caption = String(node.attrs.caption ?? "").trim();
+    // Tabelas de cabeçalho/rodapé (headerExtensions configura
+    // `data-sicro-header-table`) são institucionais/layout (ex.: bloco de
+    // registro) e NÃO recebem legenda numerada — espelha o NodeView
+    // (SicroTableView.isHeaderFooterRegion). Sem isto, a legenda "piscava":
+    // aparecia ao editar (NodeView) e sumia ao desfocar (este clone).
+    const isHeaderFooterTable = Boolean(
+      (this.options.HTMLAttributes as Record<string, unknown> | undefined)?.[
+        "data-sicro-header-table"
+      ],
+    );
+    // Sem <caption> também pra: legenda removida (captionVisible=false) e
+    // tabela de layout (borderStyle none) — espelha o NodeView/syncCaption.
+    const captionAllowed =
+      !isHeaderFooterTable &&
+      node.attrs.captionVisible !== false &&
+      (node.attrs.borderStyle as string | null) !== "none";
+    const caption = captionAllowed
+      ? String(node.attrs.caption ?? "").trim()
+      : "";
     const children: unknown[] = [];
     if (caption) {
       children.push([
@@ -266,7 +300,22 @@ export const SicroTable = Table.extend({
       setTableCaption:
         (caption: string) =>
         ({ commands }) =>
-          commands.updateAttributes(this.name, { caption }),
+          // Digitar uma legenda implica querê-la visível.
+          commands.updateAttributes(this.name, {
+            caption,
+            captionVisible: true,
+          }),
+      setTableCaptionVisible:
+        (visible: boolean) =>
+        ({ commands }) =>
+          commands.updateAttributes(
+            this.name,
+            // Remover (estilo Word) também apaga o texto; re-adicionar cria
+            // vazia (o NodeView mostra o placeholder "descreva a tabela…").
+            visible
+              ? { captionVisible: true }
+              : { captionVisible: false, caption: "" },
+          ),
       setTablePresentation:
         (attrs) =>
         ({ commands }) =>

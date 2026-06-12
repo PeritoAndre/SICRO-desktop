@@ -44,7 +44,7 @@ import { resolveFieldValue, type FieldResolveContext } from "./fields";
 import { extractOutline, numberOutline } from "./sections";
 
 const BASE_DOC_STYLES = `
-  body { margin: 0; font-family: "Times New Roman", Cambria, serif; color: #111; }
+  body { margin: 0; font-family: Arial, "Helvetica Neue", Helvetica, sans-serif; color: #111; }
 
   h1 { font-size: 18pt; text-align: center; }
   h2 { font-size: 14pt; }
@@ -77,11 +77,15 @@ const BASE_DOC_STYLES = `
       var(--sicro-table-border-color, #444);
     padding: var(--sicro-table-cell-padding, 4px) 8px;
     vertical-align: top; box-sizing: border-box;
+    /* Palavra maior que a coluna quebra DENTRO da célula (espelha o
+       editor/clone) — sem isto vazava pra fora da tabela no PDF. */
+    overflow-wrap: break-word; word-break: break-word;
   }
-  /* Cabecalho: so negrito (herdado do th), SEM fundo cinza automatico —
-     espelha o BUG FIX do styles.css. O sombreado de celula e opcional e
-     explicito (attr backgroundColor -> style inline background-color emitido
-     pelo renderHTML do cell, vale aqui sem regra extra). */
+  /* Cabecalho (th): SEM negrito do navegador nem fundo cinza automatico —
+     espelha styles.css. O peso da fonte e decisao do perito (marca bold
+     explicita); o sombreado de celula e opcional e explicito (attr
+     backgroundColor -> style inline emitido pelo renderHTML do cell). */
+  table[data-sicro-table] th { font-weight: inherit; text-align: left; }
   /* F4 — Apresentação serializada via data-* (cor/espessura/padding/align/
      bordas) + legenda <caption> abaixo da tabela. Espelha styles.css. */
   table[data-border-style="none"] td,
@@ -200,7 +204,7 @@ const BASE_DOC_STYLES = `
     overflow: visible;
     border-bottom: 0.5pt solid #999;
     padding: 0.1cm 0 0.15cm;
-    font-family: "Times New Roman", Cambria, serif;
+    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
     font-size: 11pt;
     color: #111;
   }
@@ -241,7 +245,7 @@ const BASE_DOC_STYLES = `
     border-top: 0.5pt solid #999;
     padding: 0.15cm 0 0.1cm;
     margin-top: 1.5em;
-    font-family: "Times New Roman", Cambria, serif;
+    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
     font-size: 11pt;
     color: #111;
     /* O brasão importado normalmente vem centralizado. */
@@ -335,7 +339,7 @@ function pageStyles(
   const topCenter = brandTop
     ? `@top-center {
         content: "${escapeCssString(brandTop)}";
-        font-family: "Times New Roman", Cambria, serif;
+        font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
         font-size: 9pt;
         color: #555;
         padding-bottom: 0.2cm;
@@ -353,13 +357,13 @@ function pageStyles(
         showFooter
           ? `@bottom-right {
                content: "Página " counter(page) " de " counter(pages);
-               font-family: "Times New Roman", Cambria, serif;
+               font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
                font-size: 9pt;
                color: #444;
              }
              @bottom-left {
                content: "${escapeCssString(template.footer.text)}";
-               font-family: "Times New Roman", Cambria, serif;
+               font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
                font-size: 8.5pt;
                color: #555;
              }`
@@ -369,7 +373,7 @@ function pageStyles(
         injectPageNumber && !showFooter
           ? `@bottom-center {
                content: "Folha " counter(page) " de " counter(pages);
-               font-family: "Times New Roman", Cambria, serif;
+               font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
                font-size: 9pt;
                color: #444;
              }`

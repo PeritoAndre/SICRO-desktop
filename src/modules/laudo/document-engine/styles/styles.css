@@ -418,20 +418,52 @@ figure[data-sicro-figure] figcaption:has(> br:only-child) {
   margin: 0.1cm 0 0.3cm;
   text-align: left;
   line-height: 1.3;
+  /* A linha inteira foca o texto editável no clique (vide SicroTableView). */
+  cursor: text;
 }
 .sicro-table-caption {
   font-style: italic;
   outline: none;
 }
 .sicro-table-caption--editable {
-  min-width: 2ch;
   cursor: text;
+}
+/* Alvo de clique decente SÓ quando vazia (um span inline vazio teria largura
+ * 0 e seria inclicável). Com texto, fica inline pra legenda LONGA fluir na
+ * mesma linha do prefixo — igual ao <caption> do export (inline-block não
+ * quebra e desceria o bloco inteiro pra linha de baixo). */
+.sicro-table-caption--editable.sicro-table-caption--empty {
+  display: inline-block;
+  min-width: 8ch;
 }
 /* Placeholder visual quando a legenda está vazia (só o prefixo aparece). */
 .sicro-table-caption--empty::after {
   content: "descreva a tabela…";
   color: #94a3b8;
   font-style: italic;
+}
+/* F4.1 — Botão ✕ de remover a legenda (aparece no hover da linha). */
+.sicro-table-caption-remove {
+  appearance: none;
+  border: none;
+  background: transparent;
+  margin-left: 8px;
+  padding: 0 4px;
+  font-size: 10px;
+  font-style: normal;
+  line-height: 1;
+  color: #94a3b8;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
+  vertical-align: middle;
+}
+.sicro-table-caption-row:hover .sicro-table-caption-remove,
+.sicro-table-caption-remove:focus-visible {
+  opacity: 1;
+}
+.sicro-table-caption-remove:hover {
+  color: #dc2626;
 }
 /* Legenda renderizada no clone estático / export (elemento <caption>). */
 .sicro-editor-content table > caption,
@@ -618,6 +650,21 @@ table[data-sicro-table] td {
    * border-box garante que padding/borda não estourem a coluna. */
   box-sizing: border-box;
   position: relative;
+  /* Palavra maior que a coluna QUEBRA dentro da célula. No editor o
+   * .ProseMirror já faz isto (word-wrap do prosemirror-view); o CLONE
+   * ESTÁTICO do cabeçalho/rodapé e o export não têm essa classe — sem esta
+   * regra a palavra longa vazava pra fora da tabela ao sair da edição. */
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+/* Célula de cabeçalho (th): SEM negrito imposto pelo navegador — o peso da
+ * fonte é decisão do perito (negrito do UA não é removível pela toolbar, o
+ * que travava o usuário). O fundo cinza continua marcando a linha de
+ * cabeçalho quando ela é intencional ("Alternar cabeçalho"). */
+.sicro-editor-content table th,
+table[data-sicro-table] th {
+  font-weight: inherit;
 }
 
 /* F4 — Toggle de bordas: "none" remove a grade (estilo bloco de registro).

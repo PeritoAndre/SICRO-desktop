@@ -30,6 +30,14 @@ export interface TableOps {
   setCellBackground: (color: string | null) => void;
   /** Move o nó tabela pra cima/baixo entre os blocos irmãos (reordenar). */
   moveBlock: (dir: "up" | "down") => void;
+  /** Mostra/esconde a legenda "Tabela N — …" (estilo Word: remover apaga o
+   *  texto; adicionar cria vazia, com placeholder). */
+  toggleCaption: () => void;
+  /** A legenda está visível? (default true; tabelas novas nascem com ela) */
+  captionVisible: () => boolean;
+  /** Legenda se aplica? Falso em cabeçalho/rodapé (tabela institucional) e
+   *  em tabelas de layout (sem borda) — nesses casos o menu esconde o item. */
+  canToggleCaption: () => boolean;
   canMergeCells: () => boolean;
   canSplitCell: () => boolean;
   canMoveUp: () => boolean;
@@ -166,6 +174,25 @@ export function buildTableOps(
           .run(),
       ),
     moveBlock: (dir) => moveTableBlock(editor, tablePos, dir),
+    toggleCaption: () => {
+      const node = editor.state.doc.nodeAt(tablePos);
+      const visible = node?.attrs.captionVisible !== false;
+      run(() =>
+        editor.chain().focus().setTableCaptionVisible(!visible).run(),
+      );
+    },
+    captionVisible: () => {
+      const node = editor.state.doc.nodeAt(tablePos);
+      return node?.attrs.captionVisible !== false;
+    },
+    canToggleCaption: () => {
+      // Cabeçalho/rodapé: tabela institucional, sem legenda (vide
+      // SicroTableView.isHeaderFooterRegion). Layout (sem borda): idem.
+      const region = editor.view.dom.getAttribute("data-sicro-region");
+      if (region === "header" || region === "footer") return false;
+      const node = editor.state.doc.nodeAt(tablePos);
+      return (node?.attrs.borderStyle as string | null) !== "none";
+    },
     canMergeCells: () => editor.can().mergeCells(),
     canSplitCell: () => editor.can().splitCell(),
     canMoveUp: () => canMoveTableUp(editor, tablePos),

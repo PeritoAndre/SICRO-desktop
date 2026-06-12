@@ -40,6 +40,9 @@ export function useFooterEditor(options: UseFooterEditorOptions) {
     editorProps: {
       attributes: {
         class: "sicro-editor-content",
+        // Mesma marcação do cabeçalho: tabelas no rodapé são institucionais/
+        // layout e não recebem legenda numerada (vide SicroTableView).
+        "data-sicro-region": "footer",
       },
     },
     onUpdate({ editor: ed }) {
@@ -57,6 +60,11 @@ export function useFooterEditor(options: UseFooterEditorOptions) {
   // disparar onUpdate.
   useEffect(() => {
     if (!editor) return;
+    // Mesmo guard do useHeaderEditor: com o editor FOCADO, initialContent
+    // divergente é eco atrasado do próprio persist — repor mataria as
+    // teclas mais novas e jogaria o cursor pro fim (cursor "pula" da
+    // tabela ao digitar rápido).
+    if (editor.isFocused) return;
     const currentJson = editor.getJSON();
     if (jsonContentEqual(currentJson, initialContent)) return;
     isExternalUpdateRef.current = true;

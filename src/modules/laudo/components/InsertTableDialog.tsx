@@ -39,14 +39,16 @@ export function InsertTableDialog({
 }: InsertTableDialogProps) {
   const [rows, setRows] = useState(DEFAULT_ROWS);
   const [cols, setCols] = useState(DEFAULT_COLS);
-  const [withHeader, setWithHeader] = useState(true);
+  // Padrão DESMARCADO (estilo Word): tabela nova nasce com células comuns,
+  // sem linha de cabeçalho — nada de negrito/cinza que o perito não pediu.
+  const [withHeader, setWithHeader] = useState(false);
 
   // Reset ao abrir.
   useEffect(() => {
     if (open) {
       setRows(DEFAULT_ROWS);
       setCols(DEFAULT_COLS);
-      setWithHeader(true);
+      setWithHeader(false);
     }
   }, [open]);
 

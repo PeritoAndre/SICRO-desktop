@@ -62,7 +62,10 @@ import styles from "./EditorToolbar.module.css";
 // Caller pode usar `setFontFamily(family)` com qualquer string CSS
 // válida se precisar de algo fora desta lista.
 const FONT_FAMILIES: ReadonlyArray<{ value: string; label: string }> = [
-  { value: "", label: "Fonte padrão" },
+  // "" só aparece em seleção MISTA (fontes diferentes no trecho). Sem fonte
+  // explícita o combo mostra a fonte EFETIVA (Arial, o padrão do documento) —
+  // nunca um genérico "fonte padrão".
+  { value: "", label: "—" },
   // Sans-serif comuns
   { value: "Arial, sans-serif", label: "Arial" },
   { value: "'Arial Black', sans-serif", label: "Arial Black" },
@@ -362,14 +365,14 @@ export function EditorToolbar({
   const rawSize = readTextStyleAttr(editor, "fontSize");
   const rawColor = readTextStyleAttr(editor, "color");
 
-  // Pós-laudo S — defaults Times New Roman 12pt. Quando o usuário ainda
-  // não escolheu fonte/tamanho explicitamente (e não há mistura), mostramos
-  // esses valores pra fechar o gap de feedback visual. Em seleção mista a
-  // família mostra "" ("Fonte padrão") e o tamanho fica vazio.
+  // Defaults Arial 12pt (padrão do documento — vide --font-doc). Quando o
+  // usuário ainda não escolheu fonte/tamanho explicitamente (e não há
+  // mistura), mostramos a fonte EFETIVA no combo — nunca "fonte padrão".
+  // Em seleção mista a família mostra "—" e o tamanho fica vazio.
   const fontFamilyMixed = rawFamily === MIXED;
   const currentFontFamily = fontFamilyMixed
     ? ""
-    : (rawFamily ?? "Times New Roman, serif");
+    : (rawFamily ?? "Arial, sans-serif");
 
   // Tamanho como NÚMERO em pt (exibido sem "pt" no campo). `null` = vazio
   // (seleção mista ou unidade não-pt).

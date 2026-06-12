@@ -30,6 +30,8 @@ import {
   AlignRight,
   ArrowDownToLine,
   ArrowUpToLine,
+  Captions,
+  CaptionsOff,
   ChevronDown,
   ChevronUp,
   Ban,
@@ -639,6 +641,13 @@ export function TableOverlay({
           <MenuItem icon={<Merge size={14} />} label="Mesclar células" onClick={closeMenuThen(ops.mergeCells)} disabled={!ops.canMergeCells()} />
           <MenuItem icon={<Split size={14} />} label="Dividir célula" onClick={closeMenuThen(ops.splitCell)} disabled={!ops.canSplitCell()} />
           <MenuItem icon={<TableRowsSplit size={14} />} label="Alternar cabeçalho" onClick={closeMenuThen(ops.toggleHeaderRow)} />
+          {ops.canToggleCaption() && (
+            <MenuItem
+              icon={ops.captionVisible() ? <CaptionsOff size={14} /> : <Captions size={14} />}
+              label={ops.captionVisible() ? "Remover legenda" : "Adicionar legenda"}
+              onClick={closeMenuThen(ops.toggleCaption)}
+            />
+          )}
           <div className={styles.menuDivider} />
           <MenuItem icon={<ChevronUp size={14} />} label="Mover para cima" onClick={closeMenuThen(() => ops.moveBlock("up"))} disabled={!ops.canMoveUp()} />
           <MenuItem icon={<ChevronDown size={14} />} label="Mover para baixo" onClick={closeMenuThen(() => ops.moveBlock("down"))} disabled={!ops.canMoveDown()} />

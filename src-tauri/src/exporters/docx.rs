@@ -70,7 +70,7 @@ pub fn render_doc_to_docx(
         .and_then(Value::as_object)
         .cloned();
 
-    // Padrão do documento = Times New Roman 12pt (24 meios-pontos), igual ao
+    // Padrão do documento = Arial 12pt (24 meios-pontos), igual ao
     // editor (--font-doc) e ao render HTML. SEM isto, o corpo (runs sem size
     // explícito, criados com base_size=None) saía no default do docx-rs
     // (~10,5pt) — MENOR que os 12pt da tela. Isso era um descompasso de WYSIWYG
@@ -78,7 +78,7 @@ pub fn render_doc_to_docx(
     // linhas por página (o Word empacotava ~60 linhas onde o editor mostrava 48).
     let base = Docx::new()
         .default_size(24)
-        .default_fonts(RunFonts::new().ascii("Times New Roman").hi_ansi("Times New Roman"));
+        .default_fonts(RunFonts::new().ascii("Arial").hi_ansi("Arial"));
     let mut docx = build_institutional_chrome(base, template_id, metadata.as_ref());
 
     // N11 — Header dinâmico Word-style. Se envelope.header existir,
@@ -756,10 +756,23 @@ fn render_table(docx: Docx, table_node: &Value, ctx: &RenderCtx) -> Docx {
     // F4 — Legenda da tabela (attr `caption`) como parágrafo itálico abaixo,
     // espelhando o figcaption do Figure no DOCX (texto do perito; o prefixo
     // "Tabela N —" é decoração viva do editor / numeração do render HTML).
+    //
+    // F4.1 — Mesmo gate do renderHTML do editor (captionAllowed): tabela de
+    // LAYOUT (borderStyle "none") e legenda REMOVIDA (captionVisible=false)
+    // não emitem legenda. O DOCX anda o .sicrodoc CRU (não passa pelo
+    // numberFigures do TS), então sem este gate um caption órfão — ex.:
+    // tabela legendada que depois virou layout pelo diálogo de propriedades,
+    // ou HTML colado com data-caption-visible="false" — imprimiria aqui (e
+    // no PDF via LibreOffice) mesmo invisível no editor/HTML.
+    let caption_allowed = border_style != "none"
+        && attrs
+            .and_then(|a| a.get("captionVisible"))
+            .and_then(Value::as_bool)
+            != Some(false);
     let docx = if let Some(caption) = attrs
         .and_then(|a| a.get("caption"))
         .and_then(Value::as_str)
-        .filter(|c| !c.trim().is_empty())
+        .filter(|c| caption_allowed && !c.trim().is_empty())
     {
         docx.add_paragraph(
             Paragraph::new()

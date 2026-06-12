@@ -102,7 +102,7 @@ export interface SicroDocLayout {
 /** Valores padrão da numeração de página (laudo institucional). */
 export const DEFAULT_PAGE_NUMBER: SicroDocPageNumber = {
   format: "Página {n} de {total}",
-  font_family: "Times New Roman",
+  font_family: "Arial",
   size_pt: 10,
   color: "#000000",
   align: "center",
@@ -110,8 +110,8 @@ export const DEFAULT_PAGE_NUMBER: SicroDocPageNumber = {
 
 /** Fontes oferecidas no seletor de numeração (compatíveis com o laudo/PDF). */
 export const PAGE_NUMBER_FONTS: readonly string[] = [
-  "Times New Roman",
   "Arial",
+  "Times New Roman",
   "Calibri",
   "Cambria",
   "Georgia",

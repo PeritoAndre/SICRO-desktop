@@ -41,6 +41,7 @@ export class SicroTableView extends TableView {
   /** Linha da legenda: prefixo numerado (não-editável) + texto editável. */
   private captionPrefix: HTMLElement;
   private captionEl: HTMLElement;
+  private captionRemoveBtn: HTMLElement;
   private view: EditorView | null;
 
   constructor(node: PMNode, cellMinWidth: number, view?: EditorView) {
@@ -63,13 +64,22 @@ export class SicroTableView extends TableView {
     // Linha da legenda (abaixo da tabela, como o figcaption do Figure):
     //   [Tabela N — ] prefixo numerado, NÃO-editável (espelha AutoNumbering)
     //   [texto livre] editável → attr `caption`
+    //   [✕] botão de remover a legenda (hover) — estilo Word
     const row = document.createElement("div");
     row.className = "sicro-table-caption-row";
     row.setAttribute("data-table-caption", "true");
+    // FRONTEIRA DE EDIÇÃO — o fix do "clico e nada acontece". A linha inteira
+    // é `contenteditable=false`; só o span do texto volta a ser `true`. Sem a
+    // fronteira false no meio, o Chromium NÃO move o foco pra um
+    // contenteditable aninhado dentro do contenteditable do ProseMirror (o
+    // atributo vira no-op) — o caret ficava no editor raiz, o PM relia a
+    // seleção e a legenda nunca recebia foco. Com a fronteira, o span vira um
+    // editing host PRÓPRIO: clique foca, digitação flui, e o PM ignora o
+    // subtree não-editável (stopEvent + ignoreMutation cobrem o resto).
+    row.contentEditable = "false";
 
     const prefix = document.createElement("span");
     prefix.className = "sicro-auto-number-table";
-    prefix.contentEditable = "false";
     prefix.setAttribute("data-auto-number", "true");
     row.appendChild(prefix);
     this.captionPrefix = prefix;
@@ -77,12 +87,24 @@ export class SicroTableView extends TableView {
     const caption = document.createElement("span");
     caption.className = "sicro-table-caption sicro-table-caption--editable";
     caption.setAttribute("data-table-caption-edit", "true");
-    caption.contentEditable = "true";
+    // plaintext-only (Chromium/WebView2): colar conteúdo rico vira texto puro
+    // — sem <b>/<span style> residuais no DOM da legenda (o attr só guarda
+    // textContent). O listener de paste abaixo é o cinto extra (multi-linha).
+    caption.contentEditable = "plaintext-only";
     caption.setAttribute("role", "textbox");
     caption.setAttribute("aria-label", "Legenda da tabela");
     caption.spellcheck = true;
     row.appendChild(caption);
     this.captionEl = caption;
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "sicro-table-caption-remove";
+    removeBtn.title = "Remover legenda (pode recriar pelo botão direito)";
+    removeBtn.setAttribute("aria-label", "Remover legenda da tabela");
+    removeBtn.textContent = "✕";
+    row.appendChild(removeBtn);
+    this.captionRemoveBtn = removeBtn;
 
     block.appendChild(row);
 
@@ -100,9 +122,32 @@ export class SicroTableView extends TableView {
     return (this.node.attrs.borderStyle as string | null) === "none";
   }
 
+  /** Região do editor (corpo/cabeçalho/rodapé). Tabelas em cabeçalho/rodapé
+   *  são institucionais/layout (ex.: bloco de registro) e NÃO recebem a
+   *  legenda numerada "Tabela N — …" — senão ela "pisca" (aparece no NodeView
+   *  ao editar, some no clone estático ao desfocar) e atrapalha o cabeçalho.
+   *  Detectado pelo `data-sicro-region` que useHeaderEditor/useFooterEditor
+   *  põem no DOM do editor. */
+  private isHeaderFooterRegion(): boolean {
+    const dom = this.view?.dom as HTMLElement | undefined;
+    const region = dom?.getAttribute?.("data-sicro-region");
+    return region === "header" || region === "footer";
+  }
+
+  /** Tabela NUMERÁVEL = exibição de conteúdo com legenda visível. Tabelas de
+   *  layout (sem borda) e tabelas com legenda REMOVIDA (captionVisible=false)
+   *  não consomem número — espelhado em numbering.ts, AutoNumbering e
+   *  extractTables (manter os 4 em sincronia). */
+  private static isNumerable(attrs: Record<string, unknown>): boolean {
+    return (
+      (attrs.borderStyle as string | null) !== "none" &&
+      attrs.captionVisible !== false
+    );
+  }
+
   /** Ordinal da tabela (1-based) por ordem de aparição no documento, contando
-   *  só tabelas NUMERÁVEIS (com borda). Independe de `id` — robusto pra docs
-   *  legados. */
+   *  só tabelas NUMERÁVEIS (vide isNumerable). Independe de `id` — robusto pra
+   *  docs legados. */
   private computeOrdinal(): number {
     if (!this.view) return 1;
     let selfPos: number | null = null;
@@ -129,8 +174,7 @@ export class SicroTableView extends TableView {
     let found = false;
     this.view.state.doc.descendants((n, pos) => {
       if (n.type.name === "table") {
-        // Conta só tabelas numeráveis (com borda).
-        if ((n.attrs.borderStyle as string | null) !== "none") {
+        if (SicroTableView.isNumerable(n.attrs as Record<string, unknown>)) {
           count += 1;
           if (pos === selfTablePos) {
             ordinal = count;
@@ -149,11 +193,21 @@ export class SicroTableView extends TableView {
    *  Tabelas de LAYOUT (sem borda) escondem a linha de legenda inteira. */
   private syncCaption() {
     const captionRow = this.captionEl.parentElement;
-    if (this.isLayoutTable()) {
+    if (
+      this.isLayoutTable() ||
+      this.isHeaderFooterRegion() ||
+      this.node.attrs.captionVisible === false
+    ) {
       if (captionRow) captionRow.style.display = "none";
       return;
     }
     if (captionRow) captionRow.style.display = "";
+
+    // Modo Leitura: legenda visível mas não-editável (os handlers também têm
+    // gate em view.editable; aqui é o reflexo visual — cursor/✕).
+    const editable = this.view?.editable ?? true;
+    this.captionEl.contentEditable = editable ? "plaintext-only" : "false";
+    this.captionRemoveBtn.style.display = editable ? "" : "none";
 
     const text = String(this.node.attrs.caption ?? "");
     if (document.activeElement === this.captionEl) {
@@ -214,62 +268,159 @@ export class SicroTableView extends TableView {
 
   private commitTimer: ReturnType<typeof setTimeout> | null = null;
 
-  private commitCaption() {
-    if (!this.view) return;
-    const text = this.captionEl.textContent ?? "";
-    if (text === String(this.node.attrs.caption ?? "")) return;
+  /** Posição PM do PRÓPRIO nó table no doc (resolvida pelo DOM). `null` se o
+   *  NodeView ainda não está conectado/resolvível. */
+  private resolveTablePos(): number | null {
+    if (!this.view) return null;
     let pos: number | null = null;
     try {
       pos = this.view.posAtDOM(this.tableWrapper, 0);
     } catch {
       pos = null;
     }
-    if (pos == null || pos < 0) return;
+    if (pos == null || pos < 0) return null;
     // posAtDOM(tableWrapper, 0) cai DENTRO da tabela; a posição do nó table
     // é a do bloco que a contém. Resolvemos subindo até o nó `table`.
     const { state } = this.view;
     const $pos = state.doc.resolve(Math.min(pos, state.doc.content.size));
-    let tablePos: number | null = null;
     for (let d = $pos.depth; d >= 0; d--) {
-      if ($pos.node(d).type.name === "table") {
-        tablePos = $pos.before(d);
-        break;
-      }
+      if ($pos.node(d).type.name === "table") return $pos.before(d);
     }
+    return null;
+  }
+
+  /** Aplica um patch de attrs no nó table (transação undoable). */
+  private patchTableAttrs(patch: Record<string, unknown>) {
+    if (!this.view) return;
+    const tablePos = this.resolveTablePos();
     if (tablePos == null) return;
+    const { state } = this.view;
     const node = state.doc.nodeAt(tablePos);
     if (!node || node.type.name !== "table") return;
     const tr = state.tr.setNodeMarkup(tablePos, undefined, {
       ...node.attrs,
-      caption: text,
+      ...patch,
     });
     tr.setMeta("addToHistory", true);
     this.view.dispatch(tr);
   }
 
+  private commitCaption() {
+    // Somente-leitura (modo Leitura): nunca modifica o doc por aqui.
+    if (!this.view?.editable) return;
+    const text = this.captionEl.textContent ?? "";
+    if (text === String(this.node.attrs.caption ?? "")) return;
+    this.patchTableAttrs({ caption: text });
+  }
+
+  /** Remove a legenda (estilo Word): apaga o texto e esconde a linha. A tabela
+   *  deixa de consumir um número "Tabela N". Recriável pelo botão direito
+   *  ("Adicionar legenda") — vide tableOps/TableOverlay. */
+  private removeCaption() {
+    if (!this.view?.editable) return;
+    if (this.commitTimer) {
+      clearTimeout(this.commitTimer);
+      this.commitTimer = null;
+    }
+    this.captionEl.blur();
+    this.patchTableAttrs({ caption: "", captionVisible: false });
+    // Devolve o foco ao editor: Ctrl+Z desfaz a remoção de imediato (sem o
+    // focus, o atalho não chega ao ProseMirror até o próximo clique).
+    this.view?.focus();
+  }
+
+  /** Foca o texto da legenda com o caret no fim (clique no prefixo/na linha). */
+  private focusCaptionEnd() {
+    this.captionEl.focus();
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(this.captionEl);
+      range.collapse(false);
+      const sel = window.getSelection();
+      sel?.removeAllRanges();
+      sel?.addRange(range);
+    } catch {
+      /* caret best-effort */
+    }
+  }
+
   private wireCaptionEvents() {
-    // Debounce do commit pra não gerar 1 transação por tecla.
+    // Commit IMEDIATO a cada input (sem debounce): elimina a janela de perda
+    // de texto (fechar o app / trocar de laudo com a legenda focada matava o
+    // timer pendente sem comitar — destroy() não pode dispatchar). O undo não
+    // vira 1 passo por tecla: o prosemirror-history agrupa setNodeMarkup
+    // adjacentes pelo newGroupDelay (500ms). O syncCaption pós-commit roda
+    // com activeElement === span e textContent já igual ao attr → não reseta
+    // o cursor (verificado).
     this.captionEl.addEventListener("input", () => {
+      if (!this.view?.editable) return;
       this.captionEl.classList.toggle(
         "sicro-table-caption--empty",
         (this.captionEl.textContent ?? "").trim() === "",
       );
-      if (this.commitTimer) clearTimeout(this.commitTimer);
-      this.commitTimer = setTimeout(() => this.commitCaption(), 400);
-    });
-    this.captionEl.addEventListener("blur", () => {
-      if (this.commitTimer) {
-        clearTimeout(this.commitTimer);
-        this.commitTimer = null;
-      }
       this.commitCaption();
     });
-    // Enter na legenda não deve quebrar linha — confirma e sai.
+    this.captionEl.addEventListener("blur", () => {
+      this.commitCaption();
+    });
+    // Paste em TEXTO PURO (cinto extra ao plaintext-only): normaliza
+    // multi-linha pra espaço único — legenda é uma linha só.
+    this.captionEl.addEventListener("paste", (e) => {
+      e.preventDefault();
+      if (!this.view?.editable) return;
+      const text = (e.clipboardData?.getData("text/plain") ?? "")
+        .replace(/\s+/g, " ")
+        .trim();
+      // execCommand preserva o undo nativo do contenteditable no Chromium.
+      document.execCommand("insertText", false, text);
+    });
+    // Enter na legenda não deve quebrar linha — confirma e sai. Backspace com
+    // a legenda VAZIA remove a linha inteira (estilo Word). Esc sai sem mais.
     this.captionEl.addEventListener("keydown", (e) => {
+      if (!this.view?.editable) {
+        e.preventDefault();
+        return;
+      }
       if (e.key === "Enter") {
         e.preventDefault();
         this.captionEl.blur();
+      } else if (
+        e.key === "Backspace" &&
+        (this.captionEl.textContent ?? "").trim() === ""
+      ) {
+        e.preventDefault();
+        this.removeCaption();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        this.captionEl.blur();
       }
+    });
+    // Botão ✕ — remove a legenda. mousedown+preventDefault evita roubar o
+    // foco antes do click.
+    this.captionRemoveBtn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+    });
+    this.captionRemoveBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      this.removeCaption();
+    });
+    // Clique no prefixo "Tabela N — " ou na área vazia da linha → foca o
+    // texto editável (a linha é contenteditable=false; sem isto o clique
+    // fora do span não faria nada).
+    const row = this.captionEl.parentElement;
+    row?.addEventListener("mousedown", (e) => {
+      if (!this.view?.editable) return;
+      const target = e.target as globalThis.Node;
+      if (
+        target === this.captionEl ||
+        this.captionEl.contains(target) ||
+        target === this.captionRemoveBtn ||
+        this.captionRemoveBtn.contains(target)
+      ) {
+        return; // o próprio span/botão tratam
+      }
+      e.preventDefault();
+      this.focusCaptionEnd();
     });
   }
 
