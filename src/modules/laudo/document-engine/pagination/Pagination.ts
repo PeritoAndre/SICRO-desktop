@@ -499,6 +499,16 @@ function computeSplitDecos(
         ];
       }
 
+      // Margem colapsada entre este bloco e o próximo: nem as line boxes nem o
+      // offsetHeight a capturam, mas o effectiveHeight (offsetTop-diff) sim. Ela
+      // é contada no preenchimento da página DEPOIS das linhas (sem quebrar a
+      // última linha do parágrafo por causa da própria margem) — espelhando o
+      // modo block (estável). Sem isto, "uma letra por linha" subconta ~1 margem
+      // por <p>; o erro acumula e a margem superior das páginas seguintes
+      // degrada (~1 linha por página).
+      const measuredSum = segments.reduce((s, sg) => s + sg.height, 0);
+      const trailingMarginPx = Math.max(0, effectiveHeight - measuredSum);
+
       for (const seg of segments) {
         if (
           yOnCurrentPage + seg.height > usableHeightPx - SAFETY_PX &&
@@ -534,6 +544,9 @@ function computeSplitDecos(
         }
         yOnCurrentPage += seg.height;
       }
+      // Conta a margem colapsada até o próximo bloco (vide acima) no
+      // preenchimento da página — sem quebrar a última linha deste parágrafo.
+      yOnCurrentPage += trailingMarginPx;
     }
   } finally {
     // Restaura o display dos spacers (a medição já terminou).
